@@ -1,0 +1,4 @@
+hoppie-connector==0.2.0
+pyinstaller==6.12.0
+requests==2.32.3
+wxPython==4.2.2
