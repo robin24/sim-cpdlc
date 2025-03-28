@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on tags like v1.2.3
+      - "v*.*.*"
 
 # Define permissions needed for creating releases
 permissions:
@@ -23,13 +23,13 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Extract version from tag
+      - name: Extract version from release
         id: get_version
         shell: bash
         run: |
           # Extract version without the 'v' prefix (e.g., v1.2.3 -> 1.2.3)
           VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version extracted: $VERSION"
 
       - name: Install dependencies
@@ -38,7 +38,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Update version numbers
-        run: python update_version.py ${{ env.VERSION }}
+        run: python update_version.py ${{ steps.get_version.outputs.version }}
 
       - name: Build with PyInstaller
         run: |
@@ -48,18 +48,15 @@ jobs:
         run: |
           # Create a zip file of the PyInstaller output
           cd dist
-          powershell Compress-Archive -Path * -DestinationPath ../sim-cpdlc-${{ env.VERSION }}.zip
+          powershell Compress-Archive -Path * -DestinationPath ../sim-cpdlc-${{ steps.get_version.outputs.version }}.zip
           cd ..
           echo "Created zip archive of PyInstaller output"
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Release Asset
+        id: upload_release_asset
+        uses: softprops/action-gh-release@v2
         with:
-          name: Sim-CPDLC v${{ env.VERSION }}
-          draft: false
-          prerelease: false
           files: |
-            sim-cpdlc-${{ env.VERSION }}.zip
+            sim-cpdlc-${{ steps.get_version.outputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

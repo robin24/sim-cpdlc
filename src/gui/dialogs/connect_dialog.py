@@ -108,6 +108,9 @@ class ConnectDialog(wx.Dialog):
         self.callsign_text.Bind(wx.EVT_TEXT, self.on_text_change)
         self.logon_code_text.Bind(wx.EVT_TEXT, self.on_text_change)
 
+        # Check if fields are valid on initialization
+        self.on_text_change(None)
+
     def on_network_selection(self, event):
         """
         Handle network selection change.
