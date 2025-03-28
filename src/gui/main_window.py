@@ -62,6 +62,9 @@ class MainWindow(wx.Frame):
         self.message_manager = MessageManager(logger)
         self.cpdlc_session = CpdlcSession(logger, self.connection_manager)
 
+        # Check if this is the first launch (config file just created)
+        self._check_first_launch()
+
         # Initialize sound for new messages
         sound_path = self.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
         if os.path.exists(sound_path):
@@ -618,6 +621,44 @@ class MainWindow(wx.Frame):
             return False
 
         return True
+
+    def _check_first_launch(self):
+        """Check if this is the first launch and prompt for settings if needed."""
+        import os
+        from src.config import CONFIG_FILE, load_config, save_config, DEFAULT_CONFIG
+
+        # Check if config file exists
+        config_file_exists = os.path.exists(CONFIG_FILE)
+
+        # If config file doesn't exist, this is the first launch
+        if not config_file_exists:
+            self.logger.info("First launch detected - creating config file")
+
+            # Create the config file with empty values
+            config = DEFAULT_CONFIG.copy()
+            save_config(config)
+
+            # Show alert dialog
+            dlg = wx.MessageDialog(
+                self,
+                "Welcome to Sim-CPDLC!\n\n"
+                "It looks like this is your first time running the application. "
+                "Would you like to set up your logon codes and SimBrief user ID now?\n\n"
+                "These settings are required for connecting to CPDLC networks and retrieving SimBrief flight plans.",
+                "Welcome to Sim-CPDLC",
+                wx.YES_NO | wx.ICON_INFORMATION,
+            )
+
+            result = dlg.ShowModal()
+            dlg.Destroy()
+
+            if result == wx.ID_YES:
+                self.logger.debug("User chose to set up settings on first launch")
+                # Open the settings dialog
+                wx.CallAfter(self.on_settings, None)
+            else:
+                self.logger.debug("User chose not to set up settings on first launch")
+                # Continue with normal UI presentation
 
     def on_exit(self, _):
         """Handle exit menu selection by closing the window."""
