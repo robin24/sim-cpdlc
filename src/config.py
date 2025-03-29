@@ -3,9 +3,24 @@
 import os
 import json
 import logging
+import appdirs
+
+# Application information
+APP_NAME = "Sim-CPDLC"
+APP_AUTHOR = "Sim-CPDLC"
+
+
+# Get user data directory
+def get_user_data_dir():
+    """Get the OS-specific user data directory for this application."""
+    data_dir = appdirs.user_data_dir(APP_NAME, APP_AUTHOR)
+    # Ensure directory exists
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
 
 # Configuration file path
-CONFIG_FILE = "config.json"
+CONFIG_FILE = os.path.join(get_user_data_dir(), "config.json")
 
 # Default configuration
 DEFAULT_CONFIG = {

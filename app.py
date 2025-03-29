@@ -9,6 +9,7 @@ import wx
 
 from src.logging_setup import setup_logging
 from src.gui import MainWindow
+from src.config import get_user_data_dir
 
 
 def main():
@@ -16,6 +17,10 @@ def main():
     # Set up logging
     logger = setup_logging()
     logger.info("Application starting")
+
+    # Log user data directory location
+    user_data_dir = get_user_data_dir()
+    logger.info(f"Using user data directory: {user_data_dir}")
 
     # Create and start the application
     app = wx.App(False)
