@@ -44,19 +44,16 @@ jobs:
         run: |
           pyinstaller app.spec
 
-      - name: Package artifacts
-        run: |
-          # Create a zip file of the PyInstaller output
-          cd dist
-          powershell Compress-Archive -Path * -DestinationPath ../sim-cpdlc-${{ steps.get_version.outputs.version }}.zip
-          cd ..
-          echo "Created zip archive of PyInstaller output"
+      - name: Run Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: ./sim-cpdlc.iss
 
       - name: Upload Release Asset
         id: upload_release_asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            sim-cpdlc-${{ steps.get_version.outputs.version }}.zip
+            installer/Sim-CPDLC-${{ steps.get_version.outputs.version }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
