@@ -69,6 +69,13 @@ class CpdlcSession:
             self.logger.warning("Logon attempted without active connection")
             return False
 
+        # Validate station name is exactly 4 characters
+        if len(station) != 4:
+            self.logger.warning(
+                f"Invalid station name: {station} (must be 4 characters)"
+            )
+            return False
+
         self.logger.info(f"Attempting to logon to station: {station}")
         self.cpdlc_min_counter = 1
         message = "REQUEST LOGON"
@@ -81,7 +88,8 @@ class CpdlcSession:
         )
 
         if success:
-            self.current_station = station
+            # Don't set current_station yet, just increment the counter
+            self.cpdlc_min_counter += 1
             self.logger.info(f"Logon request sent to {station}")
             return True
         else:
@@ -248,6 +256,37 @@ class CpdlcSession:
         self.logger.debug(f"Telex content: {message}")
 
         return self.connection_manager.send_telex(recipient, message)
+
+    def handle_logon_accepted(self, station: str) -> None:
+        """Handle a LOGON ACCEPTED message from a station.
+
+        Args:
+            station: The station that accepted the logon
+        """
+        # Validate station name is exactly 4 characters
+        if len(station) != 4:
+            self.logger.warning(
+                f"Invalid station name in LOGON ACCEPTED: {station} (must be 4 characters)"
+            )
+            return
+
+        # Handle both explicit logon acceptance and automatic handovers
+        self.logger.info(f"Logon accepted by station: {station}")
+        self.current_station = station
+
+    def handle_station_logoff(self, station: str) -> None:
+        """Handle a LOGOFF message from a station.
+
+        Args:
+            station: The station that sent the logoff
+        """
+        if self.current_station == station:
+            self.logger.info(f"Received LOGOFF from station: {station}")
+            self.current_station = ""
+        else:
+            self.logger.warning(
+                f"Received LOGOFF from {station} but current station is {self.current_station}"
+            )
 
     def send_pdc_request(
         self,

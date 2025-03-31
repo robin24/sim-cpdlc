@@ -142,7 +142,7 @@ class MainWindow(wx.Frame):
         self.menu_item_logoff = requests_menu.Append(
             wx.ID_ANY, "Log&off\tCTRL+O", "Logoff from the current CPDLC station."
         )
-        self.menu_item_logoff.Enable(False)  # Initially disabled until logged on
+        # Always enable both logon and logoff menu items
         menu_item_altitude_change = requests_menu.Append(
             wx.ID_ANY, "&Altitude change\tCTRL+T", "Request an altitude change."
         )
@@ -304,7 +304,6 @@ class MainWindow(wx.Frame):
         self.connection_manager.disconnect()
 
         # Update UI
-        self.menu_item_logoff.Enable(False)
         self.menu_item_connect.SetItemLabel("&Connect")
         self.menu_item_connect.SetHelp("Connect to the CPDLC network")
         self.SetStatusText("Disconnected from CPDLC network.")
@@ -328,13 +327,22 @@ class MainWindow(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             station = dlg.get_logon_details()
 
+            # Validate station name is exactly 4 characters
+            if len(station) != 4:
+                wx.MessageBox(
+                    "Station name must be exactly 4 characters long.",
+                    "Invalid Station Name",
+                    wx.OK | wx.ICON_ERROR,
+                )
+                dlg.Destroy()
+                return
+
             if self.cpdlc_session.logon(station):
                 # Add custom message
                 self._add_custom_message("REQUEST LOGON")
 
-                # Update UI
-                self.menu_item_logoff.Enable(True)
-                self.SetStatusText(f"Logged on to {station}.")
+                # Update UI to show pending logon status
+                self.SetStatusText(f"Pending logon to {station}.")
 
                 # Set active polling
                 self.polling_controller.set_active_polling()
@@ -350,6 +358,11 @@ class MainWindow(wx.Frame):
     def on_logoff(self, _):
         """Initiate logoff from current CPDLC station."""
         if not self.cpdlc_session.is_logged_on():
+            wx.MessageBox(
+                "You are not currently logged on to any station.",
+                "Not Logged On",
+                wx.OK | wx.ICON_INFORMATION,
+            )
             return
 
         # Confirm logoff
@@ -370,7 +383,6 @@ class MainWindow(wx.Frame):
             self._add_custom_message(f"Logging off from {station}")
 
             # Update UI
-            self.menu_item_logoff.Enable(False)
             self.SetStatusText("Logged off from CPDLC station.")
 
             # Set active polling
@@ -546,6 +558,31 @@ class MainWindow(wx.Frame):
 
             # Play sound for new messages
             self._play_message_sound()
+
+            # Check for special messages that affect CPDLC session state
+            if hasattr(message, "get_packet_content") and hasattr(
+                message, "get_from_name"
+            ):
+                content = message.get_packet_content()
+                sender = message.get_from_name()
+
+                # Check for LOGON ACCEPTED message
+                if "LOGON ACCEPTED" in content:
+                    # Handle automatic handovers or explicit logon acceptance
+                    self.cpdlc_session.handle_logon_accepted(sender)
+                    # Update UI
+                    self.SetStatusText(f"Logged on to {sender}.")
+                    self.logger.info(f"Logon accepted by {sender}")
+
+                # Check for LOGOFF message from station
+                elif (
+                    "LOGOFF" in content
+                    and sender == self.cpdlc_session.get_current_station()
+                ):
+                    self.cpdlc_session.handle_station_logoff(sender)
+                    # Update UI
+                    self.SetStatusText("Logged off from CPDLC station.")
+                    self.logger.info(f"Received LOGOFF from {sender}")
 
     def _on_acknowledge_message(self, message, response):
         """Handle message acknowledgement.
