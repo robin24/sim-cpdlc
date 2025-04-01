@@ -45,9 +45,9 @@ jobs:
           pyinstaller app.spec
 
       - name: Run Inno Setup
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        uses: robin24/inno-setup-action@v1
         with:
-          path: ./sim-cpdlc.iss
+          filepath: ./sim-cpdlc.iss
 
       - name: Upload Release Asset
         id: upload_release_asset
