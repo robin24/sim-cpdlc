@@ -36,6 +36,7 @@ from src.gui.dialogs import (
     TelexDialog,
     show_about_dialog,
 )
+from src.utils.update_checker import UpdateChecker
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
 
@@ -78,6 +79,17 @@ class MainWindow(wx.Frame):
 
         # Initialize UI
         self._init_ui()
+
+        # Initialize update checker
+        self.update_checker = UpdateChecker(self, logger)
+
+        # Check for updates if enabled in settings
+        config = load_config()
+        if config.get("auto_check_updates", True):
+            self.logger.debug("Auto-update check enabled, checking for updates")
+            self.update_checker.check_for_updates()
+        else:
+            self.logger.debug("Auto-update check disabled")
 
         # Initialize controller
         self.polling_controller = PollingController(
@@ -124,6 +136,9 @@ class MainWindow(wx.Frame):
         menu_item_settings = file_menu.Append(
             wx.ID_ANY, "&Settings", "Configure application settings"
         )
+        menu_item_check_updates = file_menu.Append(
+            wx.ID_ANY, "Check for &Updates", "Check for new versions of the application"
+        )
         menu_item_about = file_menu.Append(
             wx.ID_ABOUT, "&About", " Information about this program"
         )
@@ -158,6 +173,7 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_about, menu_item_about)
         self.Bind(wx.EVT_MENU, self.on_connect_or_disconnect, self.menu_item_connect)
         self.Bind(wx.EVT_MENU, self.on_settings, menu_item_settings)
+        self.Bind(wx.EVT_MENU, self.on_check_updates, menu_item_check_updates)
         self.Bind(wx.EVT_MENU, self.on_pdc_request, menu_item_pdc)
         self.Bind(wx.EVT_MENU, self.on_logon, menu_item_logon)
         self.Bind(wx.EVT_MENU, self.on_logoff, self.menu_item_logoff)
@@ -174,24 +190,30 @@ class MainWindow(wx.Frame):
         current_sayintentions_logon_code = config.get("sayintentions_logon_code", "")
         current_hoppie_logon_code = config.get("hoppie_logon_code", "")
         current_simbrief_userid = config.get("simbrief_userid", "")
+        current_auto_check_updates = config.get("auto_check_updates", True)
 
         dlg = SettingsDialog(
             self,
             current_sayintentions_logon_code,
             current_hoppie_logon_code,
             current_simbrief_userid,
+            current_auto_check_updates,
         )
         if dlg.ShowModal() == wx.ID_OK:
             # Get the new settings
-            new_sayintentions_logon_code, new_hoppie_logon_code, new_simbrief_userid = (
-                dlg.get_settings()
-            )
+            (
+                new_sayintentions_logon_code,
+                new_hoppie_logon_code,
+                new_simbrief_userid,
+                new_auto_check_updates,
+            ) = dlg.get_settings()
             self.logger.debug("Saving new settings")
 
             # Update the config
             config["sayintentions_logon_code"] = new_sayintentions_logon_code
             config["hoppie_logon_code"] = new_hoppie_logon_code
             config["simbrief_userid"] = new_simbrief_userid
+            config["auto_check_updates"] = new_auto_check_updates
             if save_config(config):
                 self.logger.info("Settings saved successfully")
                 wx.MessageBox(
@@ -210,6 +232,11 @@ class MainWindow(wx.Frame):
             self.logger.debug("Settings dialog cancelled")
 
         dlg.Destroy()
+
+    def on_check_updates(self, _):
+        """Manually check for updates."""
+        self.logger.debug("Manually checking for updates")
+        self.update_checker.check_for_updates(auto_check=False)
 
     def on_about(self, _):
         """Display information about the application."""

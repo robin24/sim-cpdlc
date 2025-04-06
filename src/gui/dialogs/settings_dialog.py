@@ -16,6 +16,7 @@ class SettingsDialog(wx.Dialog):
         sayintentions_logon_code="",
         hoppie_logon_code="",
         simbrief_userid="",
+        auto_check_updates=True,
     ):
         """
         Initialize the settings dialog.
@@ -25,6 +26,7 @@ class SettingsDialog(wx.Dialog):
             sayintentions_logon_code (str): The current SayIntentions logon code to display
             hoppie_logon_code (str): The current Hoppie logon code to display
             simbrief_userid (str): The current SimBrief User ID to display
+            auto_check_updates (bool): Whether to automatically check for updates
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Settings", size=(-1, -1))
 
@@ -83,6 +85,24 @@ class SettingsDialog(wx.Dialog):
         )
         vbox.Add(simbrief_help_text, 0, wx.ALL, 5)
 
+        # Add a separator
+        vbox.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.ALL, 5)
+
+        # Auto-update checkbox
+        self.auto_check_updates_checkbox = wx.CheckBox(
+            self, label="Automatically check for updates"
+        )
+        self.auto_check_updates_checkbox.SetValue(auto_check_updates)
+        vbox.Add(self.auto_check_updates_checkbox, 0, wx.ALL, 5)
+
+        # Help text for auto-update
+        auto_update_help_text = wx.StaticText(
+            self,
+            label="When enabled, the application will check for updates when it starts.\n"
+            "You can always check for updates manually from the File menu.",
+        )
+        vbox.Add(auto_update_help_text, 0, wx.ALL, 5)
+
         # Buttons
         hbox = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_button = wx.Button(self, wx.ID_OK, label="Save")
@@ -100,10 +120,11 @@ class SettingsDialog(wx.Dialog):
         Get the settings entered by the user.
 
         Returns:
-            tuple: (sayintentions_logon_code, hoppie_logon_code, simbrief_userid)
+            tuple: (sayintentions_logon_code, hoppie_logon_code, simbrief_userid, auto_check_updates)
         """
         return (
             self.sayintentions_logon_code_text.GetValue(),
             self.hoppie_logon_code_text.GetValue(),
             self.simbrief_userid_text.GetValue(),
+            self.auto_check_updates_checkbox.GetValue(),
         )

@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "sayintentions_logon_code": "",
     "hoppie_logon_code": "",
     "simbrief_userid": "",
+    "auto_check_updates": True,  # Enable automatic update checks by default
 }
 
 
@@ -46,12 +47,6 @@ def load_config():
         with open(CONFIG_FILE, "r") as f:
             config = json.load(f)
             logger.debug(f"Loaded config: {config}")
-
-            # Handle migration from old config format to new format
-            if "logon_code" in config and "sayintentions_logon_code" not in config:
-                logger.info("Migrating from old config format to new format")
-                # Move the old logon_code to sayintentions_logon_code
-                config["sayintentions_logon_code"] = config.pop("logon_code")
 
             # Validate required fields exist, add any missing ones
             for key, default_value in DEFAULT_CONFIG.items():
