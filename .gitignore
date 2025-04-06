@@ -2,7 +2,5 @@
 __pycache__
 .venv/
 config.json
-sim-cpdlc.log
-README.md
 build/
 dist/
