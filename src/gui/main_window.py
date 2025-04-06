@@ -34,6 +34,7 @@ from src.gui.dialogs import (
     PDCDialog,
     AltitudeChangeDialog,
     TelexDialog,
+    show_about_dialog,
 )
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
@@ -212,14 +213,7 @@ class MainWindow(wx.Frame):
 
     def on_about(self, _):
         """Display information about the application."""
-        dlg = wx.MessageDialog(
-            self,
-            "A simple CPDLC client for SayIntentions.ai and Hoppie.nl",
-            "About Sim-CPDLC",
-            wx.OK,
-        )
-        dlg.ShowModal()
-        dlg.Destroy()
+        show_about_dialog(self)
 
     def on_connect_or_disconnect(self, _):
         """Toggle connection state based on current status."""

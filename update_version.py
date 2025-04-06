@@ -129,10 +129,44 @@ def update_iss_version(file_path, new_version):
         return False
 
 
+def update_config_version(file_path, new_version):
+    """
+    Update the version number in the config.py file.
+
+    Args:
+        file_path: Path to the config.py file
+        new_version: New version string (e.g., '1.2.3')
+
+    Returns:
+        bool: True if file was updated, False otherwise
+    """
+    try:
+        # Read the current content
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Update the version definition
+        content = re.sub(
+            r'APP_VERSION = "[\d\.]+"',
+            f'APP_VERSION = "{new_version}"',
+            content,
+        )
+
+        # Write the updated content back to the file
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return True
+
+    except Exception as e:
+        print(f"Error updating config version: {e}", file=sys.stderr)
+        return False
+
+
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
-        description="Update version numbers in version_info.txt and sim-cpdlc.iss"
+        description="Update version numbers in version_info.txt, sim-cpdlc.iss, and config.py"
     )
     parser.add_argument("version", help="New version number (e.g., 1.2.3)")
     parser.add_argument(
@@ -146,6 +180,11 @@ def main():
         help="Path to Inno Setup script file (default: sim-cpdlc.iss)",
     )
     parser.add_argument(
+        "--config-file",
+        default="src/config.py",
+        help="Path to config.py file (default: src/config.py)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be changed without making changes",
@@ -155,13 +194,24 @@ def main():
 
     version_file_path = Path(args.version_file)
     iss_file_path = Path(args.iss_file)
+    config_file_path = Path(args.config_file)
+
+    # Check if files exist
+    files_exist = True
 
     if not version_file_path.exists():
         print(f"Error: File '{version_file_path}' not found.", file=sys.stderr)
-        return 1
+        files_exist = False
 
     if not iss_file_path.exists():
         print(f"Error: File '{iss_file_path}' not found.", file=sys.stderr)
+        files_exist = False
+
+    if not config_file_path.exists():
+        print(f"Error: File '{config_file_path}' not found.", file=sys.stderr)
+        files_exist = False
+
+    if not files_exist:
         return 1
 
     if args.dry_run:
@@ -174,23 +224,23 @@ def main():
         print(f"  - Version string: {version_string}")
         print(f"  - Would update version in: {version_file_path}")
         print(f"  - Would update version in: {iss_file_path}")
+        print(f"  - Would update version in: {config_file_path}")
         return 0
 
     success_version = update_version_info(version_file_path, args.version)
     success_iss = update_iss_version(iss_file_path, args.version)
+    success_config = update_config_version(config_file_path, args.version)
 
-    if success_version and success_iss:
+    # Report results
+    success_count = sum([success_version, success_iss, success_config])
+    if success_count == 3:
         print(f"Successfully updated version to {args.version} in all files")
         return 0
-    elif success_version:
-        print(
-            f"Updated version in {version_file_path} but failed to update {iss_file_path}"
-        )
-        return 1
-    elif success_iss:
-        print(
-            f"Updated version in {iss_file_path} but failed to update {version_file_path}"
-        )
+    elif success_count > 0:
+        print(f"Updated version to {args.version} in {success_count} out of 3 files:")
+        print(f"  - version_info.txt: {'Success' if success_version else 'Failed'}")
+        print(f"  - sim-cpdlc.iss: {'Success' if success_iss else 'Failed'}")
+        print(f"  - config.py: {'Success' if success_config else 'Failed'}")
         return 1
     else:
         print("Failed to update version in any files")

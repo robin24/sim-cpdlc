@@ -8,6 +8,10 @@ import appdirs
 # Application information
 APP_NAME = "Sim-CPDLC"
 APP_AUTHOR = "Sim-CPDLC"
+GITHUB_URL = "https://github.com/robin24/sim-cpdlc"
+
+# Application version - this will be updated by update_version.py
+APP_VERSION = "0.1.0"
 
 
 # Get user data directory
