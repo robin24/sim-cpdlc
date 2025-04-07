@@ -44,6 +44,15 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 
 ## Usage Guide
 
+### Main Window
+
+The main window of Sim-CPDLC is very simple, and contains the following:
+
+- Message list: holds all the messages you send and receive over the ACARS network, plus system status messages such as connection issues. Also provides the ability to acknowledge CPDLC messages using the context menu
+- Read-only text field: shows the message selected in the list, making it easier to review message text using arrow keys.
+- Menu bar: contains all the controls needed to use the client, connect to the network, etc.
+- Status bar: shows your current network status. Can easily be read with NVDA by pressing NVDA+End while the Sim-CPDLC window is in focus
+
 ### Connecting to the Network
 
 1. Click `File > Connect`
@@ -96,14 +105,12 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 1. Click `File > Disconnect` when you're finished
 2. If you're logged on to a station, the application will automatically send a logoff message
 
-
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## Acknowledgements
 
 - Huge thanks to islandcontroller for the wonderful [hoppie-connector](https://github.com/islandcontroller/hoppie-connector) Python package, without which this project would not have been possible
 - Hoppie, developer and maintainer of the Hoppie's ACARS implementation and network infrastructure.
 - [Dave Black](https://github.com/daveblackuk), developer of the  compatibility layer between Hoppie's ACARS and SayIntentions.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
