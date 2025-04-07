@@ -10,7 +10,7 @@ def setup_logging():
     """Configure application logging with console and rotating file handlers."""
     # Create logger
     logger = logging.getLogger("Sim-CPDLC")
-    logger.setLevel(logging.DEBUG)  # Set to DEBUG for early testing
+    logger.setLevel(logging.INFO)
 
     # Prevent duplicate handlers if logger already exists
     if logger.handlers:
