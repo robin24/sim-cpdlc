@@ -318,6 +318,6 @@ class CpdlcSession:
             f"Requesting PDC from {origin_icao} to {destination_icao} with aircraft {aircraft_code}"
         )
 
-        message = f"{self.callsign} request predep clearance {aircraft_code} to {destination_icao} at {origin_icao} stand {stand_designator} atis {atis_code}".upper()
+        message = f"Request predep clearance {self.callsign} {aircraft_code} to {destination_icao} at {origin_icao} stand {stand_designator} atis {atis_code}".upper()
 
         return self.connection_manager.send_telex(origin_icao, message)
