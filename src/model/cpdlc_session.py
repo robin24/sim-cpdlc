@@ -1,7 +1,7 @@
 """CPDLC session management for the client."""
 
 import logging
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 
 from hoppie_connector import CpdlcResponseRequirement as RR
 
@@ -56,25 +56,26 @@ class CpdlcSession:
         """
         return self.current_station
 
-    def logon(self, station: str) -> bool:
+    def logon(self, station: str) -> Tuple[bool, Optional[str]]:
         """Logon to a CPDLC station.
 
         Args:
             station: The station to logon to
 
         Returns:
-            bool: True if logon request sent, False otherwise
+            tuple: (success, message_text) where success is True if logon request sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.connection_manager.is_connected():
             self.logger.warning("Logon attempted without active connection")
-            return False
+            return False, None
 
         # Validate station name is exactly 4 characters
         if len(station) != 4:
             self.logger.warning(
                 f"Invalid station name: {station} (must be 4 characters)"
             )
-            return False
+            return False, None
 
         self.logger.info(f"Attempting to logon to station: {station}")
         self.cpdlc_min_counter = 1
@@ -91,20 +92,21 @@ class CpdlcSession:
             # Don't set current_station yet, just increment the counter
             self.cpdlc_min_counter += 1
             self.logger.info(f"Logon request sent to {station}")
-            return True
+            return True, message
         else:
             self.logger.error(f"Failed to send logon request to {station}")
-            return False
+            return False, None
 
-    def logoff(self) -> bool:
+    def logoff(self) -> Tuple[bool, Optional[str]]:
         """Logoff from the current station.
 
         Returns:
-            bool: True if logoff request sent, False otherwise
+            tuple: (success, message_text) where success is True if logoff request sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.current_station or not self.connection_manager.is_connected():
             self.logger.debug("Logoff attempted without active station or connection")
-            return False
+            return False, None
 
         self.logger.info(f"Logging off from station: {self.current_station}")
         message = "LOGOFF"
@@ -122,21 +124,22 @@ class CpdlcSession:
             self.cpdlc_min_counter += 1
             self.current_station = ""
             self.logger.info(f"Successfully logged off from {previous_station}")
-            return True
+            return True, message
         else:
             self.logger.error(
                 f"Failed to send logoff message to {self.current_station}"
             )
-            return False
+            return False, None
 
-    def send_logoff_message(self) -> bool:
+    def send_logoff_message(self) -> Tuple[bool, Optional[str]]:
         """Send a logoff message to the current station.
 
         Returns:
-            bool: True if message sent successfully, False otherwise
+            tuple: (success, message_text) where success is True if message sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.current_station or not self.connection_manager.is_connected():
-            return False
+            return False, None
 
         self.logger.info(f"Sending logoff message to {self.current_station}")
         message = "LOGOFF"
@@ -153,14 +156,14 @@ class CpdlcSession:
             previous_station = self.current_station
             self.current_station = ""
             self.logger.info(f"Successfully logged off from {previous_station}")
-            return True
+            return True, message
         else:
             self.logger.error(f"Error sending logoff message to {self.current_station}")
-            return False
+            return False, None
 
     def send_altitude_change_request(
         self, altitude: str, is_climb: bool, reason: Optional[str] = None
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Send an altitude change request.
 
         Args:
@@ -169,13 +172,14 @@ class CpdlcSession:
             reason: Optional reason for the request
 
         Returns:
-            bool: True if request sent successfully, False otherwise
+            tuple: (success, message_text) where success is True if request sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.current_station or not self.connection_manager.is_connected():
             self.logger.warning(
                 "Altitude change attempted without active station or connection"
             )
-            return False
+            return False, None
 
         direction = "climb" if is_climb else "descent"
         self.logger.info(
@@ -199,12 +203,14 @@ class CpdlcSession:
             self.logger.debug(
                 f"Altitude change request sent, new MIN counter: {self.cpdlc_min_counter}"
             )
-            return True
+            return True, message
         else:
             self.logger.error("Failed to send altitude change request")
-            return False
+            return False, None
 
-    def send_acknowledgement(self, sender: str, min_value: int, response: str) -> bool:
+    def send_acknowledgement(
+        self, sender: str, min_value: int, response: str
+    ) -> Tuple[bool, Optional[str]]:
         """Send an acknowledgement response to a CPDLC message.
 
         Args:
@@ -213,11 +219,12 @@ class CpdlcSession:
             response: The response text (WILCO, UNABLE, etc.)
 
         Returns:
-            bool: True if acknowledgement sent successfully, False otherwise
+            tuple: (success, message_text) where success is True if acknowledgement sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.connection_manager.is_connected():
             self.logger.error("Cannot send acknowledgement: not connected")
-            return False
+            return False, None
 
         self.logger.info(
             f"Acknowledging message from {sender} (MIN: {min_value}) with response: {response}"
@@ -233,12 +240,12 @@ class CpdlcSession:
 
         if success:
             self.cpdlc_min_counter += 1
-            return True
+            return True, response
         else:
             self.logger.error(f"Failed to send acknowledgement to {sender}")
-            return False
+            return False, None
 
-    def send_telex(self, recipient: str, message: str) -> bool:
+    def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.
 
         Args:
@@ -246,16 +253,18 @@ class CpdlcSession:
             message: The message text
 
         Returns:
-            bool: True if message sent successfully, False otherwise
+            tuple: (success, message_text) where success is True if message sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.connection_manager.is_connected():
             self.logger.warning("Telex attempted without active connection")
-            return False
+            return False, None
 
         self.logger.info(f"Sending telex to {recipient}")
         self.logger.debug(f"Telex content: {message}")
 
-        return self.connection_manager.send_telex(recipient, message)
+        success = self.connection_manager.send_telex(recipient, message)
+        return success, message if success else None
 
     def handle_logon_accepted(self, station: str) -> None:
         """Handle a LOGON ACCEPTED message from a station.
@@ -295,7 +304,7 @@ class CpdlcSession:
         aircraft_code: str,
         stand_designator: str,
         atis_code: str,
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Send a PDC (Pre-Departure Clearance) request.
 
         Args:
@@ -306,13 +315,14 @@ class CpdlcSession:
             atis_code: ATIS information letter
 
         Returns:
-            bool: True if request sent successfully, False otherwise
+            tuple: (success, message_text) where success is True if request sent successfully,
+                  and message_text is the message text that was sent (or None if failed)
         """
         if not self.connection_manager.is_connected() or not self.callsign:
             self.logger.warning(
                 "PDC request attempted without active connection or callsign"
             )
-            return False
+            return False, None
 
         self.logger.info(
             f"Requesting PDC from {origin_icao} to {destination_icao} with aircraft {aircraft_code}"
@@ -320,4 +330,5 @@ class CpdlcSession:
 
         message = f"Request predep clearance {self.callsign} {aircraft_code} to {destination_icao} at {origin_icao} stand {stand_designator} atis {atis_code}".upper()
 
-        return self.connection_manager.send_telex(origin_icao, message)
+        success = self.connection_manager.send_telex(origin_icao, message)
+        return success, message if success else None

@@ -312,7 +312,9 @@ class MainWindow(wx.Frame):
 
         # If logged on to a station, send logoff message first
         if self.cpdlc_session.is_logged_on():
-            self.cpdlc_session.send_logoff_message()
+            success, message = self.cpdlc_session.send_logoff_message()
+            if success and message:
+                self._add_custom_message(message)
             self.polling_controller.set_active_polling()
 
             # Small delay to allow the message to be sent
@@ -358,9 +360,11 @@ class MainWindow(wx.Frame):
                 dlg.Destroy()
                 return
 
-            if self.cpdlc_session.logon(station):
-                # Add custom message
-                self._add_custom_message("REQUEST LOGON")
+            success, message = self.cpdlc_session.logon(station)
+            if success:
+                # Add custom message only if a message was returned from the session
+                if message:
+                    self._add_custom_message(message)
 
                 # Update UI to show pending logon status
                 self.SetStatusText(f"Pending logon to {station}.")
@@ -399,12 +403,13 @@ class MainWindow(wx.Frame):
             self.logger.debug("Logoff cancelled by user")
             return
 
-        if self.cpdlc_session.logoff():
-            # Add custom message
-            self._add_custom_message(f"Logging off from {station}")
+        success, message = self.cpdlc_session.logoff()
+        if success:
+            if message:
+                self._add_custom_message(message)
 
             # Update UI
-            self.SetStatusText("Logged off from CPDLC station.")
+            self.SetStatusText(f"Logged off from {station}")
 
             # Set active polling
             self.polling_controller.set_active_polling()
@@ -439,17 +444,12 @@ class MainWindow(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             altitude, reason, is_climb = dlg.get_altitude_details()
 
-            if self.cpdlc_session.send_altitude_change_request(
+            success, message = self.cpdlc_session.send_altitude_change_request(
                 altitude, is_climb, reason
-            ):
-                # Construct message for display
-                direction = "climb" if is_climb else "descent"
-                message = f"REQUEST {direction.upper()} TO {altitude}"
-                if reason:
-                    message += f" DUE TO {reason.upper()}"
-
-                # Add custom message
-                self._add_custom_message(message)
+            )
+            if success:
+                if message:
+                    self._add_custom_message(message)
 
                 # Set active polling
                 self.polling_controller.set_active_polling()
@@ -490,9 +490,12 @@ class MainWindow(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             recipient, message = dlg.get_telex_details()
 
-            if self.cpdlc_session.send_telex(recipient, message):
-                # Add custom message
-                self._add_custom_message(message)
+            success, returned_message = self.cpdlc_session.send_telex(
+                recipient, message
+            )
+            if success:
+                if returned_message:
+                    self._add_custom_message(returned_message)
             else:
                 wx.MessageBox(
                     f"Failed to send telex message to {recipient}.",
@@ -524,19 +527,16 @@ class MainWindow(wx.Frame):
                 atis_code,
             ) = dlg.get_pdc_details()
 
-            if self.cpdlc_session.send_pdc_request(
+            success, message = self.cpdlc_session.send_pdc_request(
                 origin_icao,
                 destination_icao,
                 aircraft_code,
                 stand_designator,
                 atis_code,
-            ):
-                # Construct message for display
-                callsign = self.cpdlc_session.get_callsign()
-                message = f"{callsign} request predep clearance {aircraft_code} to {destination_icao} at {origin_icao} stand {stand_designator} atis {atis_code}".upper()
-
-                # Add custom message
-                self._add_custom_message(message)
+            )
+            if success:
+                if message:
+                    self._add_custom_message(message)
 
                 # Set active polling
                 self.polling_controller.set_active_polling()
@@ -602,7 +602,7 @@ class MainWindow(wx.Frame):
                 ):
                     self.cpdlc_session.handle_station_logoff(sender)
                     # Update UI
-                    self.SetStatusText("Logged off from CPDLC station.")
+                    self.SetStatusText(f"Logged off from {sender}")
                     self.logger.info(f"Received LOGOFF from {sender}")
 
     def _on_acknowledge_message(self, message, response):
@@ -615,12 +615,16 @@ class MainWindow(wx.Frame):
         sender = message.get_from_name()
         min_value = message.get_min()
 
-        if self.cpdlc_session.send_acknowledgement(sender, min_value, response):
+        success, returned_message = self.cpdlc_session.send_acknowledgement(
+            sender, min_value, response
+        )
+        if success:
             # Mark as acknowledged
             self.message_manager.mark_acknowledged(message)
 
-            # Add custom message for the response
-            self._add_custom_message(response)
+            # Add custom message only if a message was returned from the session
+            if returned_message:
+                self._add_custom_message(returned_message)
 
             # Set active polling
             self.polling_controller.set_active_polling()
@@ -644,7 +648,9 @@ class MainWindow(wx.Frame):
 
             # If logged on to a station, send logoff message first
             if self.cpdlc_session.is_logged_on():
-                self.cpdlc_session.send_logoff_message()
+                success, message = self.cpdlc_session.send_logoff_message()
+                if success and message:
+                    self._add_custom_message(message)
 
             # Stop polling
             self.polling_controller.stop()
