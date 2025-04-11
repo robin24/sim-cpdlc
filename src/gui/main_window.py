@@ -409,7 +409,7 @@ class MainWindow(wx.Frame):
                 self._add_custom_message(message)
 
             # Update UI
-            self.SetStatusText(f"Logged off from {station}")
+            self.SetStatusText(f"Logged off from {station}.")
 
             # Set active polling
             self.polling_controller.set_active_polling()
@@ -602,7 +602,7 @@ class MainWindow(wx.Frame):
                 ):
                     self.cpdlc_session.handle_station_logoff(sender)
                     # Update UI
-                    self.SetStatusText(f"Logged off from {sender}")
+                    self.SetStatusText(f"Logged off from {sender}.")
                     self.logger.info(f"Received LOGOFF from {sender}")
 
     def _on_acknowledge_message(self, message, response):
