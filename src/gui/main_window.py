@@ -595,6 +595,46 @@ class MainWindow(wx.Frame):
                     self.SetStatusText(f"Logged on to {sender}.")
                     self.logger.info(f"Logon accepted by {sender}")
 
+                # Check for HANDOVER message from current station
+                elif (
+                    "HANDOVER" in content
+                    and sender == self.cpdlc_session.get_current_station()
+                ):
+                    # Extract the station code from the message
+                    import re
+
+                    match = re.search(r"HANDOVER\s+([A-Z]{4})", content)
+                    if match:
+                        new_station = match.group(1)
+                        self.logger.info(
+                            f"Handover detected from {sender} to {new_station}"
+                        )
+
+                        # Update logon state (log off from current station)
+                        self.cpdlc_session.handle_station_logoff(sender)
+                        self.SetStatusText(f"Logged off from {sender}.")
+
+                        # Add system message about logging on to new station
+                        self._add_custom_message(
+                            f"Logging on to {new_station}", "SYSTEM"
+                        )
+
+                        # Send logon request to the new station
+                        success, message = self.cpdlc_session.logon(new_station)
+                        if success:
+                            if message:
+                                self._add_custom_message(message)
+                            self.SetStatusText(f"Pending logon to {new_station}.")
+                            self.polling_controller.set_active_polling()
+                        else:
+                            self.logger.error(
+                                f"Failed to send logon request to {new_station} during handover"
+                            )
+                            self._add_custom_message(
+                                f"Failed to logon to {new_station} during handover",
+                                "SYSTEM",
+                            )
+
                 # Check for LOGOFF message from station
                 elif (
                     "LOGOFF" in content

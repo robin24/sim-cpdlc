@@ -279,7 +279,6 @@ class CpdlcSession:
             )
             return
 
-        # Handle both explicit logon acceptance and automatic handovers
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
 
