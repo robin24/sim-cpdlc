@@ -39,8 +39,8 @@ class ConnectionManager:
             logon_code: CPDLC logon code
             network_type: Network type ("sayintentions" or "hoppie")
 
-        Returns:
-            bool: True if connection successful, False otherwise
+        Raises:
+            HoppieError: If connection fails
         """
         self.logger.info(
             f"Attempting to connect as {callsign} to {network_type} network"
@@ -58,18 +58,17 @@ class ConnectionManager:
                 logon_code,
                 url=api_url,
             )
-            self.callsign = callsign
-            self.logon_code = logon_code
-            self.network_type = network_type
-            self.connection_failures = 0
-            self.logger.info(
-                f"Successfully connected as {callsign} to {network_type} network"
-            )
-            return True
-        except HoppieError as exc:
-            self.logger.error(f"Connection failed: {exc}")
+        except HoppieError:
             self.cnx = None
-            return False
+            raise
+
+        self.callsign = callsign
+        self.logon_code = logon_code
+        self.network_type = network_type
+        self.connection_failures = 0
+        self.logger.info(
+            f"Successfully connected as {callsign} to {network_type} network"
+        )
 
     def disconnect(self):
         """Disconnect from the CPDLC network."""
@@ -164,19 +163,13 @@ class ConnectionManager:
             message: Message content
             mrn: Message reference number (for responses)
 
-        Returns:
-            bool: True if message sent successfully, False otherwise
+        Raises:
+            HoppieError: If message sending fails
         """
         if not self.cnx:
-            self.logger.error("Cannot send message: not connected")
-            return False
+            raise HoppieError("Not connected")
 
-        try:
-            self.cnx.send_cpdlc(recipient, min_value, response_type, message, mrn=mrn)
-            return True
-        except HoppieError as exc:
-            self.logger.error(f"Error sending CPDLC message: {exc}")
-            return False
+        self.cnx.send_cpdlc(recipient, min_value, response_type, message, mrn=mrn)
 
     def send_telex(self, recipient, message):
         """Send a TELEX message.
@@ -185,16 +178,10 @@ class ConnectionManager:
             recipient: Message recipient
             message: Message content
 
-        Returns:
-            bool: True if message sent successfully, False otherwise
+        Raises:
+            HoppieError: If message sending fails
         """
         if not self.cnx:
-            self.logger.error("Cannot send telex: not connected")
-            return False
+            raise HoppieError("Not connected")
 
-        try:
-            self.cnx.send_telex(recipient, message)
-            return True
-        except HoppieError as exc:
-            self.logger.error(f"Error sending TELEX message: {exc}")
-            return False
+        self.cnx.send_telex(recipient, message)

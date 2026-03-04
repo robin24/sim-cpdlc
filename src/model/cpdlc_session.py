@@ -3,7 +3,7 @@
 import logging
 from typing import Optional, Callable, Tuple
 
-from hoppie_connector import CpdlcResponseRequirement as RR
+from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from src.model.connection_manager import ConnectionManager
 
@@ -63,8 +63,9 @@ class CpdlcSession:
             station: The station to logon to
 
         Returns:
-            tuple: (success, message_text) where success is True if logon request sent successfully,
-                  and message_text is the message text that was sent (or None if failed)
+            tuple: (success, message_or_error) where success is True and message_or_error
+                  is the sent message text, or success is False and message_or_error is
+                  an error description (or None for precondition failures)
         """
         if not self.connection_manager.is_connected():
             self.logger.warning("Logon attempted without active connection")
@@ -81,28 +82,29 @@ class CpdlcSession:
         self.cpdlc_min_counter = 1
         message = "REQUEST LOGON"
 
-        success = self.connection_manager.send_cpdlc(
-            station,
-            self.cpdlc_min_counter,
-            RR.YES.value,
-            message,
-        )
+        try:
+            self.connection_manager.send_cpdlc(
+                station,
+                self.cpdlc_min_counter,
+                RR.YES.value,
+                message,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send logon request to {station}: {exc}")
+            return False, str(exc)
 
-        if success:
-            # Don't set current_station yet, just increment the counter
-            self.cpdlc_min_counter += 1
-            self.logger.info(f"Logon request sent to {station}")
-            return True, message
-        else:
-            self.logger.error(f"Failed to send logon request to {station}")
-            return False, None
+        # Don't set current_station yet, just increment the counter
+        self.cpdlc_min_counter += 1
+        self.logger.info(f"Logon request sent to {station}")
+        return True, message
 
     def logoff(self) -> Tuple[bool, Optional[str]]:
         """Logoff from the current station.
 
         Returns:
-            tuple: (success, message_text) where success is True if logoff request sent successfully,
-                  and message_text is the message text that was sent (or None if failed)
+            tuple: (success, message_or_error) where success is True and message_or_error
+                  is the sent message text, or success is False and message_or_error is
+                  an error description (or None for precondition failures)
         """
         if not self.current_station or not self.connection_manager.is_connected():
             self.logger.debug("Logoff attempted without active station or connection")
@@ -111,25 +113,25 @@ class CpdlcSession:
         self.logger.info(f"Logging off from station: {self.current_station}")
         message = "LOGOFF"
 
-        success = self.connection_manager.send_cpdlc(
-            self.current_station,
-            self.cpdlc_min_counter,
-            RR.NOT_REQUIRED.value,
-            message,
-        )
-
-        if success:
-            # Update session state
-            previous_station = self.current_station
-            self.cpdlc_min_counter += 1
-            self.current_station = ""
-            self.logger.info(f"Successfully logged off from {previous_station}")
-            return True, message
-        else:
-            self.logger.error(
-                f"Failed to send logoff message to {self.current_station}"
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                RR.NOT_REQUIRED.value,
+                message,
             )
-            return False, None
+        except HoppieError as exc:
+            self.logger.error(
+                f"Failed to send logoff message to {self.current_station}: {exc}"
+            )
+            return False, str(exc)
+
+        # Update session state
+        previous_station = self.current_station
+        self.cpdlc_min_counter += 1
+        self.current_station = ""
+        self.logger.info(f"Successfully logged off from {previous_station}")
+        return True, message
 
     def send_logoff_message(self) -> Tuple[bool, Optional[str]]:
         """Send a logoff message to the current station.
@@ -172,22 +174,22 @@ class CpdlcSession:
         if reason:
             message += f" DUE TO {reason.upper()}"
 
-        success = self.connection_manager.send_cpdlc(
-            self.current_station,
-            self.cpdlc_min_counter,
-            RR.W_U.value,  # Requires WILCO/UNABLE response
-            message,
-        )
-
-        if success:
-            self.cpdlc_min_counter += 1
-            self.logger.debug(
-                f"Altitude change request sent, new MIN counter: {self.cpdlc_min_counter}"
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                RR.W_U.value,  # Requires WILCO/UNABLE response
+                message,
             )
-            return True, message
-        else:
-            self.logger.error("Failed to send altitude change request")
-            return False, None
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send altitude change request: {exc}")
+            return False, str(exc)
+
+        self.cpdlc_min_counter += 1
+        self.logger.debug(
+            f"Altitude change request sent, new MIN counter: {self.cpdlc_min_counter}"
+        )
+        return True, message
 
     def send_acknowledgement(
         self, sender: str, min_value: int, response: str
@@ -216,20 +218,20 @@ class CpdlcSession:
             f"Acknowledging message from {sender} (MIN: {min_value}) with response: {response}"
         )
 
-        success = self.connection_manager.send_cpdlc(
-            sender,
-            self.cpdlc_min_counter,
-            RR.NOT_REQUIRED.value,
-            response,
-            mrn=min_value,
-        )
+        try:
+            self.connection_manager.send_cpdlc(
+                sender,
+                self.cpdlc_min_counter,
+                RR.NOT_REQUIRED.value,
+                response,
+                mrn=min_value,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send acknowledgement to {sender}: {exc}")
+            return False, str(exc)
 
-        if success:
-            self.cpdlc_min_counter += 1
-            return True, response
-        else:
-            self.logger.error(f"Failed to send acknowledgement to {sender}")
-            return False, None
+        self.cpdlc_min_counter += 1
+        return True, response
 
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.
@@ -249,8 +251,13 @@ class CpdlcSession:
         self.logger.info(f"Sending telex to {recipient}")
         self.logger.debug(f"Telex content: {message}")
 
-        success = self.connection_manager.send_telex(recipient, message)
-        return success, message if success else None
+        try:
+            self.connection_manager.send_telex(recipient, message)
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send telex to {recipient}: {exc}")
+            return False, str(exc)
+
+        return True, message
 
     def handle_logon_accepted(self, station: str) -> None:
         """Handle a LOGON ACCEPTED message from a station.
@@ -315,5 +322,10 @@ class CpdlcSession:
 
         message = f"Request predep clearance {self.callsign} {aircraft_code} to {destination_icao} at {origin_icao} stand {stand_designator} atis {atis_code}".upper()
 
-        success = self.connection_manager.send_telex(origin_icao, message)
-        return success, message if success else None
+        try:
+            self.connection_manager.send_telex(origin_icao, message)
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send PDC request to {origin_icao}: {exc}")
+            return False, str(exc)
+
+        return True, message

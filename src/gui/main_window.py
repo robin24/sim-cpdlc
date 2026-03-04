@@ -9,6 +9,7 @@ import wx.adv
 from hoppie_connector import (
     CpdlcMessage,
     CpdlcResponseRequirement as RR,
+    HoppieError,
     HoppieMessage,
 )
 
@@ -259,7 +260,15 @@ class MainWindow(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             callsign, logon_code, network_type = dlg.get_connection_details()
 
-            if self.connection_manager.connect(callsign, logon_code, network_type):
+            try:
+                self.connection_manager.connect(callsign, logon_code, network_type)
+            except HoppieError as exc:
+                wx.MessageBox(
+                    f"Connection failed: {exc}",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                )
+            else:
                 # Start polling
                 self.polling_controller.start(self)
 
@@ -273,12 +282,6 @@ class MainWindow(wx.Frame):
 
                 # Add system message
                 self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
-            else:
-                wx.MessageBox(
-                    "Connection failed. Please check your callsign and logon code.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
 
         dlg.Destroy()
 
@@ -373,8 +376,9 @@ class MainWindow(wx.Frame):
                 # Set active polling
                 self.polling_controller.set_active_polling()
             else:
+                error_detail = f": {message}" if message else ""
                 wx.MessageBox(
-                    f"Failed to send logon request to {station}.",
+                    f"Failed to send logon request to {station}{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -415,8 +419,9 @@ class MainWindow(wx.Frame):
             # Set active polling
             self.polling_controller.set_active_polling()
         else:
+            error_detail = f": {message}" if message else ""
             wx.MessageBox(
-                f"Failed to send logoff message to {station}.",
+                f"Failed to send logoff message to {station}{error_detail}.",
                 "Error",
                 wx.OK | wx.ICON_ERROR,
             )
@@ -455,8 +460,9 @@ class MainWindow(wx.Frame):
                 # Set active polling
                 self.polling_controller.set_active_polling()
             else:
+                error_detail = f": {message}" if message else ""
                 wx.MessageBox(
-                    "Failed to send altitude change request.",
+                    f"Failed to send altitude change request{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -498,8 +504,9 @@ class MainWindow(wx.Frame):
                 if returned_message:
                     self._add_custom_message(returned_message)
             else:
+                error_detail = f": {returned_message}" if returned_message else ""
                 wx.MessageBox(
-                    f"Failed to send telex message to {recipient}.",
+                    f"Failed to send telex message to {recipient}{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -542,8 +549,9 @@ class MainWindow(wx.Frame):
                 # Set active polling
                 self.polling_controller.set_active_polling()
             else:
+                error_detail = f": {message}" if message else ""
                 wx.MessageBox(
-                    f"Failed to send PDC request to {origin_icao}.",
+                    f"Failed to send PDC request to {origin_icao}{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -626,11 +634,12 @@ class MainWindow(wx.Frame):
                             self.SetStatusText(f"Pending logon to {new_station}.")
                             self.polling_controller.set_active_polling()
                         else:
+                            error_detail = f": {message}" if message else ""
                             self.logger.error(
-                                f"Failed to send logon request to {new_station} during handover"
+                                f"Failed to send logon request to {new_station} during handover{error_detail}"
                             )
                             self._add_custom_message(
-                                f"Failed to logon to {new_station} during handover",
+                                f"Failed to logon to {new_station} during handover{error_detail}",
                                 "SYSTEM",
                             )
 
@@ -667,6 +676,13 @@ class MainWindow(wx.Frame):
 
             # Set active polling
             self.polling_controller.set_active_polling()
+        else:
+            error_detail = f": {returned_message}" if returned_message else ""
+            wx.MessageBox(
+                f"Failed to send acknowledgement{error_detail}.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
 
     def _play_message_sound(self):
         """Play sound notification for new messages."""
