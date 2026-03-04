@@ -35,9 +35,7 @@ Typical sessions are single flights (1-4 hours, a few hundred messages at most).
 
 ### ~~10. SimBrief API failures silently swallowed in dialogs~~ DONE
 
-### 11. Exception handling in connection_manager loses error context — DEFERRED
-**File:** `src/model/connection_manager.py` (multiple locations)
-Changing return type from `bool` to include error info requires touching all callers. Larger refactor.
+### ~~11. Exception handling in connection_manager loses error context~~ DONE
 
 ### ~~12. `send_logoff_message()` duplicates `logoff()` logic~~ DONE
 
