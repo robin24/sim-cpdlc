@@ -119,7 +119,7 @@ class MessageView:
 
         menu_items = []
         for response in responses:
-            menu_item = menu.Append(wx.ID_ANY, response)
+            menu_item = menu.Append(wx.ID_ANY, f"Respond: {response}")
             menu_items.append(menu_item)
             self.parent.Bind(
                 wx.EVT_MENU,

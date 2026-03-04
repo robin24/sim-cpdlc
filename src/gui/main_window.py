@@ -75,7 +75,7 @@ class MainWindow(wx.Frame):
         else:
             error_msg = f"Sound file not found at {sound_path}. The program will work as expected, however you will not hear a notification sound when a new CPDLC message arrives. To restore the notification sound, please quit the app and double-check that the sound file exists at the specified path."
             self.logger.warning(error_msg)
-            wx.MessageBox(error_msg, "Missing Sound File", wx.OK | wx.ICON_ERROR)
+            wx.MessageBox(error_msg, "Missing Sound File", wx.OK | wx.ICON_WARNING)
             self.new_message_sound = None
 
         # Initialize UI
@@ -141,11 +141,11 @@ class MainWindow(wx.Frame):
             wx.ID_ANY, "Check for &Updates", "Check for new versions of the application"
         )
         menu_item_about = file_menu.Append(
-            wx.ID_ABOUT, "&About", " Information about this program"
+            wx.ID_ABOUT, "&About", "Information about this program"
         )
 
         file_menu.AppendSeparator()
-        menu_item_exit = file_menu.Append(wx.ID_EXIT, "E&xit", " Terminate the program")
+        menu_item_exit = file_menu.Append(wx.ID_EXIT, "E&xit", "Terminate the program")
         menu_bar.Append(file_menu, "&File")
 
         # Requests menu

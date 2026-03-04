@@ -77,12 +77,12 @@ class AltitudeChangeDialog(wx.Dialog):
         # Only enable the OK button if altitude is provided and is a valid number
         altitude = self.altitude_text.GetValue().strip()
         try:
-            if altitude and int(altitude) > 0:
+            fl = int(altitude) if altitude else 0
+            if 10 <= fl <= 600:
                 self.ok_button.Enable()
             else:
                 self.ok_button.Disable()
         except ValueError:
-            # Not a valid number
             self.ok_button.Disable()
 
     def get_altitude_details(self):

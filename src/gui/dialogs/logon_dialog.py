@@ -43,9 +43,9 @@ class LogonDialog(wx.Dialog):
 
     def on_text_change(self, _):
         """
-        Enable the OK button if station is provided.
+        Enable the OK button if station is exactly 4 characters.
         """
-        if self.station_text.GetValue().strip():
+        if len(self.station_text.GetValue().strip()) == 4:
             self.ok_button.Enable()
         else:
             self.ok_button.Disable()

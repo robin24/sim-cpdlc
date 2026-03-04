@@ -136,14 +136,20 @@ class PDCDialog(wx.Dialog):
 
     def on_text_change(self, _):
         """
-        Enable the OK button if all fields are provided.
+        Enable the OK button if all fields are provided and ICAO codes are 4 chars.
         """
+        origin = self.origin_icao_text.GetValue().strip()
+        dest = self.destination_icao_text.GetValue().strip()
+        aircraft = self.aircraft_text.GetValue().strip()
+        stand = self.stand_text.GetValue().strip()
+        atis = self.atis_text.GetValue().strip()
+
         if (
-            self.origin_icao_text.GetValue().strip()
-            and self.destination_icao_text.GetValue().strip()
-            and self.aircraft_text.GetValue().strip()
-            and self.stand_text.GetValue().strip()
-            and self.atis_text.GetValue().strip()
+            len(origin) == 4
+            and len(dest) == 4
+            and aircraft
+            and stand
+            and atis
         ):
             self.ok_button.Enable()
         else:
