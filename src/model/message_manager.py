@@ -204,8 +204,10 @@ class MessageManager:
             responses.append("ROGER")
         elif rr == RR.YES:
             responses.append("YES")
-        elif rr == RR.NO:
             responses.append("NO")
+        elif rr == RR.NO:
+            # N means "no response required" (used on response messages)
+            return []
         else:
             self.logger.debug("No responses needed.")
             return []

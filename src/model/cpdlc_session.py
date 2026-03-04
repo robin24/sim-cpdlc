@@ -222,7 +222,7 @@ class CpdlcSession:
             self.connection_manager.send_cpdlc(
                 sender,
                 self.cpdlc_min_counter,
-                RR.NOT_REQUIRED.value,
+                RR.NO.value,
                 response,
                 mrn=min_value,
             )
