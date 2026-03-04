@@ -630,6 +630,8 @@ class MainWindow(wx.Frame):
                 raw_content = message.get_packet_content()
                 sender = message.get_from_name()
                 msg_text = extract_message_content(raw_content) or ""
+                # Normalize @ separators to spaces for protocol-level matching
+                msg_text = " ".join(msg_text.replace("@", " ").split())
 
                 # Check for LOGON ACCEPTED message
                 if msg_text == "LOGON ACCEPTED":
