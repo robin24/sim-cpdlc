@@ -4,7 +4,7 @@ import time
 import logging
 import wx
 
-from hoppie_connector import HoppieMessage, CpdlcMessage
+from hoppie_connector import HoppieMessage, CpdlcMessage, TelexMessage
 from src.model.connection_manager import ConnectionManager
 from src.utils.message_formatting import extract_message_content
 
@@ -162,7 +162,7 @@ class PollingController:
             return False
 
         # For telex messages
-        if message.__class__.__name__ == "TelexMessage":
+        if isinstance(message, TelexMessage):
             return False
 
         # For CPDLC acknowledgements (WILCO, UNABLE, ROGER, etc.)

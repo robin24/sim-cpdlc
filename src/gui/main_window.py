@@ -1,6 +1,7 @@
 """Main window for the Sim-CPDLC application."""
 
 import os
+import re
 import sys
 import wx
 import wx.adv
@@ -601,8 +602,6 @@ class MainWindow(wx.Frame):
                     and sender == self.cpdlc_session.get_current_station()
                 ):
                     # Extract the station code from the message
-                    import re
-
                     match = re.search(r"HANDOVER\s+([A-Z]{4})", content)
                     if match:
                         new_station = match.group(1)

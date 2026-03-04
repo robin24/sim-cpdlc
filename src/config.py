@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import tempfile
 import appdirs
 
 # Application information
@@ -73,9 +74,16 @@ def save_config(config):
         return False
 
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
+        config_dir = os.path.dirname(CONFIG_FILE)
+        fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(config, f, indent=2)
+            os.replace(tmp_path, CONFIG_FILE)
             logger.debug(f"Saved config: {config}")
+        except BaseException:
+            os.unlink(tmp_path)
+            raise
         return True
     except IOError as e:
         logger.error(f"Error writing config file: {e}")
