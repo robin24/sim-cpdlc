@@ -22,6 +22,7 @@ class ConnectionManager:
         self.cnx = None
         self.callsign = ""
         self.logon_code = ""
+        self.network_type = None
         self.connection_failures = 0
         self.max_connection_failures = 3
         self.message_callback = message_callback
@@ -133,7 +134,7 @@ class ConnectionManager:
             self.logger.info(f"Attempting to reconnect as {self.callsign}...")
 
             # Select the appropriate API URL based on stored network type
-            if hasattr(self, "network_type") and self.network_type == "hoppie":
+            if self.network_type == "hoppie":
                 api_url = HOPPIE_API_URL
             else:
                 api_url = SAYINTENTIONS_API_URL

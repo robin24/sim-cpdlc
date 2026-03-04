@@ -117,8 +117,10 @@ class MessageView:
         self.logger.debug(f"Showing context menu with responses: {responses}")
         menu = wx.Menu()
 
+        menu_items = []
         for response in responses:
             menu_item = menu.Append(wx.ID_ANY, response)
+            menu_items.append(menu_item)
             self.parent.Bind(
                 wx.EVT_MENU,
                 lambda event, resp=response, msg=message: self._handle_acknowledge(
@@ -128,6 +130,10 @@ class MessageView:
             )
 
         self.parent.PopupMenu(menu)
+
+        for menu_item in menu_items:
+            self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
+
         menu.Destroy()
 
     def _handle_acknowledge(self, message: CpdlcMessage, response: str):

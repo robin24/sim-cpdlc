@@ -44,8 +44,9 @@ class UpdateChecker:
         try:
             latest_version, release_url = self._get_latest_version()
             if latest_version and self._is_newer_version(latest_version):
-                # Schedule dialog on the main thread
-                wx.CallAfter(self._show_update_dialog, latest_version, release_url)
+                # Schedule dialog on the main thread, but only if the window is still alive
+                if self.parent and not self.parent.IsBeingDeleted():
+                    wx.CallAfter(self._show_update_dialog, latest_version, release_url)
         except Exception as e:
             self.logger.error(f"Error checking for updates: {e}")
 
