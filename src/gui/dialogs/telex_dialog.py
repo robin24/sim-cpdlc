@@ -17,7 +17,7 @@ class TelexDialog(wx.Dialog):
         Args:
             parent: The parent window
         """
-        wx.Dialog.__init__(self, parent, wx.ID_ANY, "Telex", size=(400, 300))
+        wx.Dialog.__init__(self, parent, wx.ID_ANY, "Telex", size=(-1, -1))
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 

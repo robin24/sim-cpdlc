@@ -134,32 +134,13 @@ class CpdlcSession:
     def send_logoff_message(self) -> Tuple[bool, Optional[str]]:
         """Send a logoff message to the current station.
 
+        Alias for logoff() kept for backward compatibility.
+
         Returns:
             tuple: (success, message_text) where success is True if message sent successfully,
                   and message_text is the message text that was sent (or None if failed)
         """
-        if not self.current_station or not self.connection_manager.is_connected():
-            return False, None
-
-        self.logger.info(f"Sending logoff message to {self.current_station}")
-        message = "LOGOFF"
-
-        success = self.connection_manager.send_cpdlc(
-            self.current_station,
-            self.cpdlc_min_counter,
-            RR.NOT_REQUIRED.value,
-            message,
-        )
-
-        if success:
-            self.cpdlc_min_counter += 1
-            previous_station = self.current_station
-            self.current_station = ""
-            self.logger.info(f"Successfully logged off from {previous_station}")
-            return True, message
-        else:
-            self.logger.error(f"Error sending logoff message to {self.current_station}")
-            return False, None
+        return self.logoff()
 
     def send_altitude_change_request(
         self, altitude: str, is_climb: bool, reason: Optional[str] = None
@@ -225,6 +206,11 @@ class CpdlcSession:
         if not self.connection_manager.is_connected():
             self.logger.error("Cannot send acknowledgement: not connected")
             return False, None
+
+        if self.current_station and sender != self.current_station:
+            self.logger.warning(
+                f"Acknowledgement sender {sender} does not match current station {self.current_station}"
+            )
 
         self.logger.info(
             f"Acknowledging message from {sender} (MIN: {min_value}) with response: {response}"

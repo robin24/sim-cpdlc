@@ -76,8 +76,18 @@ class ConnectDialog(wx.Dialog):
                         )
                 else:
                     self.logger.warning("Failed to fetch SimBrief OFP data")
+                    wx.MessageBox(
+                        "Could not fetch flight plan from SimBrief.",
+                        "SimBrief",
+                        wx.OK | wx.ICON_WARNING,
+                    )
             except Exception as e:
                 self.logger.error(f"Error fetching SimBrief OFP: {str(e)}")
+                wx.MessageBox(
+                    f"Error fetching SimBrief data: {e}",
+                    "SimBrief",
+                    wx.OK | wx.ICON_WARNING,
+                )
 
         vbox.Add(self.callsign_text, 0, wx.ALL | wx.EXPAND, 5)
 

@@ -69,7 +69,6 @@ def format_message_text(text):
 
         # Join with newlines
         return "\n".join(formatted_lines)
-    except Exception as e:
-        # If any error occurs during formatting, return the original text
-        # This ensures the function doesn't fail even with unexpected input
+    except (ValueError, IndexError, AttributeError):
+        # If a parsing error occurs during formatting, return the original text
         return text
