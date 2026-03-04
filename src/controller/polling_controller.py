@@ -74,7 +74,11 @@ class PollingController:
             self.stop()
             return
 
-        messages, poll_status = self.connection_manager.poll()
+        try:
+            messages, poll_status = self.connection_manager.poll()
+        except Exception as e:
+            self.logger.error(f"Unexpected error during poll: {e}")
+            return
 
         # Process received messages
         if messages:
