@@ -30,9 +30,8 @@ Prioritized list of bugs and issues found during code review.
 
 ### ~~8. No validation that acknowledgement sender matches current station~~ DONE
 
-### 9. Message log grows unbounded — DEFERRED
-**File:** `src/model/message_manager.py`
-`message_log` dict and `acknowledged_messages` set grow indefinitely. Very slow leak; typical sessions are single flights. Requires design decisions on cap size and UI behavior.
+### ~~9. Message log grows unbounded~~ WON'T FIX
+Typical sessions are single flights (1-4 hours, a few hundred messages at most). Not worth the complexity of eviction logic.
 
 ### ~~10. SimBrief API failures silently swallowed in dialogs~~ DONE
 
