@@ -2,6 +2,7 @@
 
 import logging
 import wx
+import requests
 
 from hoppie_connector import HoppieConnector, HoppieError
 
@@ -185,3 +186,64 @@ class ConnectionManager:
             raise HoppieError("Not connected")
 
         self.cnx.send_telex(recipient, message)
+
+    def send_atis_request(self, icao):
+        """Send an ATIS information request via the Hoppie API.
+
+        Makes a direct HTTP GET request since hoppie_connector doesn't
+        support the inforeq message type. Always uses Hoppie's API since
+        vatatis is a Hoppie-specific feature.
+
+        Args:
+            icao: Airport ICAO code
+
+        Returns:
+            str: The ATIS text
+
+        Raises:
+            HoppieError: If not connected or request fails
+        """
+        if not self.cnx:
+            raise HoppieError("Not connected")
+
+        # Select the appropriate API URL based on stored network type
+        if self.network_type == "hoppie":
+            api_url = HOPPIE_API_URL
+        else:
+            api_url = SAYINTENTIONS_API_URL
+
+        params = {
+            "logon": self.logon_code,
+            "from": self.callsign,
+            "to": "SERVER",
+            "type": "inforeq",
+            "packet": f"vatatis {icao}",
+        }
+
+        self.logger.info(f"Requesting ATIS for {icao}")
+
+        try:
+            response = requests.get(api_url, params=params, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            self.logger.error(f"ATIS request failed: {exc}")
+            raise HoppieError(f"ATIS request failed: {exc}")
+
+        body = response.text.strip()
+
+        if body.startswith("ok "):
+            atis_text = body[3:].strip()
+            # Response is wrapped as {server info {actual text}} — extract inner content
+            import re
+            match = re.match(r"^\{server info \{(.+)\}\}$", atis_text, re.DOTALL)
+            if match:
+                atis_text = match.group(1).strip()
+            self.logger.info(f"Received ATIS for {icao}")
+            return atis_text
+        elif body.startswith("error "):
+            error_reason = body[6:].strip()
+            self.logger.error(f"ATIS request error: {error_reason}")
+            raise HoppieError(f"ATIS request error: {error_reason}")
+        else:
+            self.logger.error(f"Unexpected ATIS response: {body}")
+            raise HoppieError(f"Unexpected response: {body}")

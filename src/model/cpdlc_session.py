@@ -239,6 +239,26 @@ class CpdlcSession:
         self.cpdlc_min_counter += 1
         return True, response
 
+    def request_atis(self, icao: str) -> Tuple[bool, Optional[str]]:
+        """Request ATIS information for an airport.
+
+        Args:
+            icao: Airport ICAO code
+
+        Returns:
+            tuple: (success, atis_text_or_error)
+        """
+        if not self.connection_manager.is_connected():
+            self.logger.warning("ATIS request attempted without active connection")
+            return False, None
+
+        try:
+            atis_text = self.connection_manager.send_atis_request(icao)
+            return True, atis_text
+        except HoppieError as exc:
+            self.logger.error(f"Failed to request ATIS for {icao}: {exc}")
+            return False, str(exc)
+
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.
 

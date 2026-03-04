@@ -36,6 +36,7 @@ from src.gui.dialogs import (
     PDCDialog,
     AltitudeChangeDialog,
     TelexDialog,
+    ATISDialog,
     show_about_dialog,
 )
 from src.utils.message_formatting import extract_message_content
@@ -168,6 +169,9 @@ class MainWindow(wx.Frame):
         menu_item_telex = requests_menu.Append(
             wx.ID_ANY, "Telex &message\tCTRL+M", "Send a telex message."
         )
+        menu_item_atis = requests_menu.Append(
+            wx.ID_ANY, "AT&IS\tCTRL+I", "Request ATIS information for an airport."
+        )
         menu_bar.Append(requests_menu, "&Requests")
 
         self.SetMenuBar(menu_bar)
@@ -182,6 +186,7 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_logoff, self.menu_item_logoff)
         self.Bind(wx.EVT_MENU, self.on_altitude_change, menu_item_altitude_change)
         self.Bind(wx.EVT_MENU, self.on_telex, menu_item_telex)
+        self.Bind(wx.EVT_MENU, self.on_atis_request, menu_item_atis)
         self.Bind(wx.EVT_MENU, self.on_exit, menu_item_exit)
 
     def on_settings(self, _):
@@ -508,6 +513,34 @@ class MainWindow(wx.Frame):
                 error_detail = f": {returned_message}" if returned_message else ""
                 wx.MessageBox(
                     f"Failed to send telex message to {recipient}{error_detail}.",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                )
+
+        dlg.Destroy()
+
+    def on_atis_request(self, _):
+        """Request ATIS information for an airport."""
+        if not self.connection_manager.is_connected():
+            wx.MessageBox(
+                "You must be connected to the CPDLC network to request ATIS.",
+                "Not Connected",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        self.logger.debug("Opening ATIS request dialog")
+        dlg = ATISDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            icao = dlg.get_atis_details()
+
+            success, result = self.cpdlc_session.request_atis(icao)
+            if success:
+                self._add_custom_message(f"ATIS {icao}: {result}", "ATIS")
+            else:
+                error_detail = f": {result}" if result else ""
+                wx.MessageBox(
+                    f"Failed to retrieve ATIS for {icao}{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )

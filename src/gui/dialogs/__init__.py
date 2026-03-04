@@ -9,6 +9,7 @@ from src.gui.dialogs.altitude_change_dialog import AltitudeChangeDialog
 from src.gui.dialogs.telex_dialog import TelexDialog
 from src.gui.dialogs.settings_dialog import SettingsDialog
 from src.gui.dialogs.about_dialog import show_about_dialog
+from src.gui.dialogs.atis_dialog import ATISDialog
 
 __all__ = [
     "ConnectDialog",
@@ -18,4 +19,5 @@ __all__ = [
     "TelexDialog",
     "SettingsDialog",
     "show_about_dialog",
+    "ATISDialog",
 ]
