@@ -23,6 +23,8 @@ class CpdlcSession:
         self.current_station = ""
         self.cpdlc_min_counter = 1
         self.callsign = ""
+        self.pending_logon_min = None
+        self.pending_logon_station = None
 
     def set_callsign(self, callsign: str):
         """Set the aircraft callsign.
@@ -92,6 +94,10 @@ class CpdlcSession:
         except HoppieError as exc:
             self.logger.error(f"Failed to send logon request to {station}: {exc}")
             return False, str(exc)
+
+        # Track pending logon for MRN validation on LOGON ACCEPTED
+        self.pending_logon_min = self.cpdlc_min_counter
+        self.pending_logon_station = station
 
         # Don't set current_station yet, just increment the counter
         self.cpdlc_min_counter += 1
@@ -259,11 +265,12 @@ class CpdlcSession:
 
         return True, message
 
-    def handle_logon_accepted(self, station: str) -> None:
+    def handle_logon_accepted(self, station: str, mrn: Optional[int] = None) -> None:
         """Handle a LOGON ACCEPTED message from a station.
 
         Args:
             station: The station that accepted the logon
+            mrn: The message reference number from the LOGON ACCEPTED message
         """
         # Validate station name is exactly 4 characters
         if len(station) != 4:
@@ -272,8 +279,18 @@ class CpdlcSession:
             )
             return
 
+        # Validate MRN matches our pending logon request
+        if self.pending_logon_min is not None and mrn is not None:
+            if mrn != self.pending_logon_min:
+                self.logger.warning(
+                    f"LOGON ACCEPTED MRN {mrn} does not match pending logon MIN {self.pending_logon_min}, ignoring"
+                )
+                return
+
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
+        self.pending_logon_min = None
+        self.pending_logon_station = None
 
     def handle_station_logoff(self, station: str) -> None:
         """Handle a LOGOFF message from a station.

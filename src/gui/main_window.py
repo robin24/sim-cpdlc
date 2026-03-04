@@ -38,6 +38,7 @@ from src.gui.dialogs import (
     TelexDialog,
     show_about_dialog,
 )
+from src.utils.message_formatting import extract_message_content
 from src.utils.update_checker import UpdateChecker
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
@@ -593,24 +594,22 @@ class MainWindow(wx.Frame):
             if hasattr(message, "get_packet_content") and hasattr(
                 message, "get_from_name"
             ):
-                content = message.get_packet_content()
+                raw_content = message.get_packet_content()
                 sender = message.get_from_name()
+                msg_text = extract_message_content(raw_content) or ""
 
                 # Check for LOGON ACCEPTED message
-                if "LOGON ACCEPTED" in content:
+                if msg_text == "LOGON ACCEPTED":
                     # Handle automatic handovers or explicit logon acceptance
-                    self.cpdlc_session.handle_logon_accepted(sender)
+                    mrn = message.get_mrn() if hasattr(message, "get_mrn") else None
+                    self.cpdlc_session.handle_logon_accepted(sender, mrn=mrn)
                     # Update UI
                     self.SetStatusText(f"Logged on to {sender}.")
                     self.logger.info(f"Logon accepted by {sender}")
 
                 # Check for HANDOVER message from current station
-                elif (
-                    "HANDOVER" in content
-                    and sender == self.cpdlc_session.get_current_station()
-                ):
-                    # Extract the station code from the message
-                    match = re.search(r"HANDOVER\s+([A-Z]{4})", content)
+                elif sender == self.cpdlc_session.get_current_station():
+                    match = re.match(r"^HANDOVER\s+([A-Z]{4})$", msg_text)
                     if match:
                         new_station = match.group(1)
                         self.logger.info(
@@ -643,15 +642,12 @@ class MainWindow(wx.Frame):
                                 "SYSTEM",
                             )
 
-                # Check for LOGOFF message from station
-                elif (
-                    "LOGOFF" in content
-                    and sender == self.cpdlc_session.get_current_station()
-                ):
-                    self.cpdlc_session.handle_station_logoff(sender)
-                    # Update UI
-                    self.SetStatusText(f"Logged off from {sender}.")
-                    self.logger.info(f"Received LOGOFF from {sender}")
+                    # Check for LOGOFF message from current station
+                    elif msg_text == "LOGOFF":
+                        self.cpdlc_session.handle_station_logoff(sender)
+                        # Update UI
+                        self.SetStatusText(f"Logged off from {sender}.")
+                        self.logger.info(f"Received LOGOFF from {sender}")
 
     def _on_acknowledge_message(self, message, response):
         """Handle message acknowledgement.
