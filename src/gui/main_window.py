@@ -41,6 +41,8 @@ from src.gui.dialogs import (
 )
 from src.utils.message_formatting import extract_message_content
 from src.utils.update_checker import UpdateChecker
+from src.utils.simconnect_manager import SimConnectManager
+from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
 
@@ -67,6 +69,7 @@ class MainWindow(wx.Frame):
         self.connection_manager = ConnectionManager(logger)
         self.message_manager = MessageManager(logger)
         self.cpdlc_session = CpdlcSession(logger, self.connection_manager)
+        self.simconnect_manager = SimConnectManager()
 
         # Check if this is the first launch (config file just created)
         self._check_first_launch()
@@ -199,6 +202,7 @@ class MainWindow(wx.Frame):
         current_hoppie_logon_code = config.get("hoppie_logon_code", "")
         current_simbrief_userid = config.get("simbrief_userid", "")
         current_auto_check_updates = config.get("auto_check_updates", True)
+        current_auto_tune_com1 = config.get("auto_tune_com1", True)
 
         dlg = SettingsDialog(
             self,
@@ -206,6 +210,7 @@ class MainWindow(wx.Frame):
             current_hoppie_logon_code,
             current_simbrief_userid,
             current_auto_check_updates,
+            current_auto_tune_com1,
         )
         if dlg.ShowModal() == wx.ID_OK:
             # Get the new settings
@@ -214,6 +219,7 @@ class MainWindow(wx.Frame):
                 new_hoppie_logon_code,
                 new_simbrief_userid,
                 new_auto_check_updates,
+                new_auto_tune_com1,
             ) = dlg.get_settings()
             self.logger.debug("Saving new settings")
 
@@ -222,6 +228,7 @@ class MainWindow(wx.Frame):
             config["hoppie_logon_code"] = new_hoppie_logon_code
             config["simbrief_userid"] = new_simbrief_userid
             config["auto_check_updates"] = new_auto_check_updates
+            config["auto_tune_com1"] = new_auto_tune_com1
             if save_config(config):
                 self.logger.info("Settings saved successfully")
                 wx.MessageBox(
@@ -684,6 +691,23 @@ class MainWindow(wx.Frame):
                         self.SetStatusText(f"Logged off from {sender}.")
                         self.logger.info(f"Received LOGOFF from {sender}")
 
+                    # Check for CONTACT/MONITOR frequency (auto-tune COM1 standby)
+                    config = load_config()
+                    if config.get("auto_tune_com1", True):
+                        freq = extract_contact_frequency(msg_text)
+                        if freq is not None:
+                            self.logger.info(
+                                f"CONTACT/MONITOR frequency detected: {freq:.3f} MHz"
+                            )
+                            if self.simconnect_manager.set_com1_standby_mhz(freq):
+                                self.logger.info(
+                                    f"COM1 standby set to {freq:.3f} MHz"
+                                )
+                            else:
+                                self.logger.warning(
+                                    "Could not set COM1 standby (SimConnect unavailable)"
+                                )
+
     def _on_acknowledge_message(self, message, response):
         """Handle message acknowledgement.
 
@@ -741,6 +765,7 @@ class MainWindow(wx.Frame):
             # Stop polling
             self.polling_controller.stop()
 
+        self.simconnect_manager.disconnect()
         self.logger.info("Application shutting down")
         event.Skip()  # Allow the window to close
 

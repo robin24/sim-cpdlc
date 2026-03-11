@@ -17,6 +17,7 @@ class SettingsDialog(wx.Dialog):
         hoppie_logon_code="",
         simbrief_userid="",
         auto_check_updates=True,
+        auto_tune_com1=True,
     ):
         """
         Initialize the settings dialog.
@@ -103,6 +104,24 @@ class SettingsDialog(wx.Dialog):
         )
         vbox.Add(auto_update_help_text, 0, wx.ALL, 5)
 
+        # Add a separator
+        vbox.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.ALL, 5)
+
+        # Auto-tune COM1 checkbox
+        self.auto_tune_com1_checkbox = wx.CheckBox(
+            self, label="Auto-tune COM1 standby on CONTACT/MONITOR"
+        )
+        self.auto_tune_com1_checkbox.SetValue(auto_tune_com1)
+        vbox.Add(self.auto_tune_com1_checkbox, 0, wx.ALL, 5)
+
+        # Help text for auto-tune COM1
+        auto_tune_help_text = wx.StaticText(
+            self,
+            label="When enabled, receiving a CONTACT or MONITOR instruction will\n"
+            "automatically set the frequency as COM1 standby in MSFS via SimConnect.",
+        )
+        vbox.Add(auto_tune_help_text, 0, wx.ALL, 5)
+
         # Buttons
         hbox = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_button = wx.Button(self, wx.ID_OK, label="Save")
@@ -127,4 +146,5 @@ class SettingsDialog(wx.Dialog):
             self.hoppie_logon_code_text.GetValue(),
             self.simbrief_userid_text.GetValue(),
             self.auto_check_updates_checkbox.GetValue(),
+            self.auto_tune_com1_checkbox.GetValue(),
         )

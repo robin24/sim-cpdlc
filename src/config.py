@@ -33,6 +33,7 @@ DEFAULT_CONFIG = {
     "hoppie_logon_code": "",
     "simbrief_userid": "",
     "auto_check_updates": True,  # Enable automatic update checks by default
+    "auto_tune_com1": True,  # Auto-tune COM1 standby on CONTACT/MONITOR messages
 }
 
 
