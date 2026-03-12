@@ -10,7 +10,7 @@ added_files = [
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=[('.venv/Lib/site-packages/SimConnect/SimConnect.dll', 'SimConnect')],
     datas=added_files,
     hiddenimports=[
         'hoppie_connector',

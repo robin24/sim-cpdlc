@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("Sim-CPDLC")
 
 # Cache the import availability check
 _simconnect_available: Optional[bool] = None
