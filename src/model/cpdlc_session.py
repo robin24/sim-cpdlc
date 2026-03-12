@@ -151,14 +151,13 @@ class CpdlcSession:
         return self.logoff()
 
     def send_altitude_change_request(
-        self, altitude: str, is_climb: bool, reason: Optional[str] = None
+        self, altitude: str, reason: Optional[str] = None
     ) -> Tuple[bool, Optional[str]]:
         """Send an altitude change request.
 
         Args:
-            altitude: The requested altitude
-            is_climb: True for climb, False for descent
-            reason: Optional reason for the request
+            altitude: The requested altitude (e.g. "FL350")
+            reason: Optional reason — "WEATHER" or "PERFORMANCE"
 
         Returns:
             tuple: (success, message_text) where success is True if request sent successfully,
@@ -170,21 +169,20 @@ class CpdlcSession:
             )
             return False, None
 
-        direction = "climb" if is_climb else "descent"
         self.logger.info(
-            f"Requesting {direction} to {altitude}"
+            f"Requesting {altitude}"
             + (f" due to {reason}" if reason else "")
         )
 
-        message = f"REQUEST {direction.upper()} TO {altitude}"
+        message = f"REQUEST {altitude}"
         if reason:
-            message += f" DUE TO {reason.upper()}"
+            message += f" DUE TO {reason}"
 
         try:
             self.connection_manager.send_cpdlc(
                 self.current_station,
                 self.cpdlc_min_counter,
-                RR.W_U.value,  # Requires WILCO/UNABLE response
+                RR.YES.value,  # Yes/No response (network approves or denies)
                 message,
             )
         except HoppieError as exc:

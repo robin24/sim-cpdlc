@@ -461,10 +461,10 @@ class MainWindow(wx.Frame):
         self.logger.debug("Opening altitude change dialog")
         dlg = AltitudeChangeDialog(self)
         if dlg.ShowModal() == wx.ID_OK:
-            altitude, reason, is_climb = dlg.get_altitude_details()
+            altitude, reason = dlg.get_altitude_details()
 
             success, message = self.cpdlc_session.send_altitude_change_request(
-                altitude, is_climb, reason
+                altitude, reason
             )
             if success:
                 if message:

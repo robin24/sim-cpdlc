@@ -23,21 +23,6 @@ class AltitudeChangeDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        # Add radio buttons for climb/descent selection
-        direction_label = wx.StaticText(self, label="Direction:")
-        vbox.Add(direction_label, 0, wx.ALL, 5)
-
-        # Create a horizontal box for the radio buttons
-        direction_hbox = wx.BoxSizer(wx.HORIZONTAL)
-        self.climb_radio = wx.RadioButton(self, label="Climb", style=wx.RB_GROUP)
-        self.descent_radio = wx.RadioButton(self, label="Descent")
-        direction_hbox.Add(self.climb_radio, 0, wx.RIGHT, 10)
-        direction_hbox.Add(self.descent_radio, 0, wx.LEFT, 10)
-        vbox.Add(direction_hbox, 0, wx.ALL, 5)
-
-        # By default, select climb
-        self.climb_radio.SetValue(True)
-
         altitude_label = wx.StaticText(self, label="Requested Altitude (FL):")
         vbox.Add(altitude_label, 0, wx.ALL, 5)
         self.altitude_text = wx.TextCtrl(self)
@@ -50,10 +35,19 @@ class AltitudeChangeDialog(wx.Dialog):
         helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
         vbox.Add(helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
+        # Reason radio buttons
         reason_label = wx.StaticText(self, label="Reason (optional):")
         vbox.Add(reason_label, 0, wx.ALL, 5)
-        self.reason_text = wx.TextCtrl(self, style=wx.TE_MULTILINE, size=(-1, 60))
-        vbox.Add(self.reason_text, 0, wx.ALL | wx.EXPAND, 5)
+
+        self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
+        self.reason_weather = wx.RadioButton(self, label="Due to weather")
+        self.reason_performance = wx.RadioButton(self, label="Due to performance")
+
+        self.reason_none.SetValue(True)
+
+        vbox.Add(self.reason_none, 0, wx.LEFT | wx.RIGHT, 10)
+        vbox.Add(self.reason_weather, 0, wx.LEFT | wx.RIGHT, 10)
+        vbox.Add(self.reason_performance, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_button = wx.Button(self, wx.ID_OK, label="OK")
@@ -90,14 +84,18 @@ class AltitudeChangeDialog(wx.Dialog):
         Get the altitude details entered by the user.
 
         Returns:
-            tuple: (altitude, reason, is_climb)
+            tuple: (altitude, reason) where reason is None, "WEATHER", or "PERFORMANCE"
         """
         altitude = self.altitude_text.GetValue().strip()
-        reason = self.reason_text.GetValue().strip()
-        is_climb = self.climb_radio.GetValue()
 
         # Format altitude as FL followed by the number
         if altitude:
             altitude = f"FL{altitude}"
 
-        return altitude, reason, is_climb
+        reason = None
+        if self.reason_weather.GetValue():
+            reason = "WEATHER"
+        elif self.reason_performance.GetValue():
+            reason = "PERFORMANCE"
+
+        return altitude, reason
