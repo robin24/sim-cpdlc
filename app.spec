@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import importlib.util
 block_cipher = None
 
 added_files = [
@@ -7,10 +8,19 @@ added_files = [
     # Add any other files/folders you need
 ]
 
+# Locate SimConnect.dll next to the installed SimConnect package
+_sc_spec = importlib.util.find_spec('SimConnect')
+_sc_binaries = []
+if _sc_spec and _sc_spec.origin:
+    import os
+    _sc_dll = os.path.join(os.path.dirname(_sc_spec.origin), 'SimConnect.dll')
+    if os.path.isfile(_sc_dll):
+        _sc_binaries = [(_sc_dll, 'SimConnect')]
+
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[('.venv/Lib/site-packages/SimConnect/SimConnect.dll', 'SimConnect')],
+    binaries=_sc_binaries,
     datas=added_files,
     hiddenimports=[
         'hoppie_connector',
