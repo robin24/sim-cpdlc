@@ -22,6 +22,7 @@ a = Analysis(
         'src.gui.dialogs',
         'src.model',
         'src.controller',
+        'SimConnect',
     ],
     hookspath=[],
     hooksconfig={},

@@ -80,18 +80,32 @@ class SimConnectManager:
         Returns:
             True if the frequency was set successfully, False otherwise.
         """
-        if not self.connect():
-            return False
-
         freq_hz = int(round(frequency_mhz * 1_000_000))
 
-        try:
-            self._sm.send_event(self._event_id, freq_hz)
-            logger.info(f"COM1 standby set to {frequency_mhz:.3f} MHz ({freq_hz} Hz)")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to send COM1 standby event: {e}")
-            # Reset connection so next call retries
-            self._sm = None
-            self._event_id = None
-            return False
+        for attempt in range(2):
+            if not self.connect():
+                if attempt == 0:
+                    # Reset cached availability in case it was a transient import issue
+                    global _simconnect_available
+                    _simconnect_available = None
+                    logger.info("Retrying SimConnect connection...")
+                    continue
+                return False
+
+            try:
+                self._sm.send_event(self._event_id, freq_hz)
+                logger.info(
+                    f"COM1 standby set to {frequency_mhz:.3f} MHz ({freq_hz} Hz)"
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to send COM1 standby event: {e}")
+                # Reset connection so retry reconnects
+                self._sm = None
+                self._event_id = None
+                if attempt == 0:
+                    logger.info("Retrying after send_event failure...")
+                    continue
+                return False
+
+        return False

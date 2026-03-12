@@ -852,6 +852,9 @@ class MainWindow(wx.Frame):
                                 self.logger.warning(
                                     "Could not set COM1 standby (SimConnect unavailable)"
                                 )
+                                self.SetStatusText(
+                                    f"Auto-tune failed \u2014 set {freq:.3f} manually"
+                                )
 
     def _on_acknowledge_message(self, message, response):
         """Handle message acknowledgement.
