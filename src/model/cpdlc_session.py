@@ -257,6 +257,132 @@ class CpdlcSession:
             self.logger.error(f"Failed to request ATIS for {icao}: {exc}")
             return False, str(exc)
 
+    def send_direct_request(
+        self, fix: str, reason: Optional[str] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """Send a direct-to waypoint request.
+
+        Args:
+            fix: The waypoint/fix name
+            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+
+        Returns:
+            tuple: (success, message_text)
+        """
+        if not self.current_station or not self.connection_manager.is_connected():
+            self.logger.warning(
+                "Direct request attempted without active station or connection"
+            )
+            return False, None
+
+        message = f"REQUEST DIRECT TO {fix}"
+        if reason:
+            message += f" DUE TO {reason}"
+
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                RR.YES.value,
+                message,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send direct request: {exc}")
+            return False, str(exc)
+
+        self.cpdlc_min_counter += 1
+        return True, message
+
+    def send_speed_request(
+        self, speed: str, is_mach: bool, reason: Optional[str] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """Send a speed change request.
+
+        Args:
+            speed: The speed value (e.g. "082" for Mach, "300" for knots)
+            is_mach: True for Mach, False for knots
+            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+
+        Returns:
+            tuple: (success, message_text)
+        """
+        if not self.current_station or not self.connection_manager.is_connected():
+            self.logger.warning(
+                "Speed request attempted without active station or connection"
+            )
+            return False, None
+
+        if is_mach:
+            message = f"REQUEST M{speed}"
+        else:
+            message = f"REQUEST {speed}K"
+
+        if reason:
+            message += f" DUE TO {reason}"
+
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                RR.YES.value,
+                message,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send speed request: {exc}")
+            return False, str(exc)
+
+        self.cpdlc_min_counter += 1
+        return True, message
+
+    def send_when_can_we_expect(self, message_text: str) -> Tuple[bool, Optional[str]]:
+        """Send a WHEN CAN WE EXPECT inquiry.
+
+        Args:
+            message_text: The full message text (e.g. "WHEN CAN WE EXPECT HIGHER LEVEL")
+
+        Returns:
+            tuple: (success, message_text)
+        """
+        if not self.current_station or not self.connection_manager.is_connected():
+            self.logger.warning(
+                "When-can-we-expect request attempted without active station or connection"
+            )
+            return False, None
+
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                RR.YES.value,
+                message_text,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send when-can-we-expect request: {exc}")
+            return False, str(exc)
+
+        self.cpdlc_min_counter += 1
+        return True, message_text
+
+    def request_metar(self, icao: str) -> Tuple[bool, Optional[str]]:
+        """Request METAR information for an airport.
+
+        Args:
+            icao: Airport ICAO code
+
+        Returns:
+            tuple: (success, metar_text_or_error)
+        """
+        if not self.connection_manager.is_connected():
+            self.logger.warning("METAR request attempted without active connection")
+            return False, None
+
+        try:
+            metar_text = self.connection_manager.send_metar_request(icao)
+            return True, metar_text
+        except HoppieError as exc:
+            self.logger.error(f"Failed to request METAR for {icao}: {exc}")
+            return False, str(exc)
+
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.
 

@@ -1,5 +1,5 @@
 """
-ATIS request dialog for the Sim-CPDLC application.
+Weather information request dialog for the Sim-CPDLC application.
 """
 
 import wx
@@ -7,19 +7,30 @@ import wx
 
 class ATISDialog(wx.Dialog):
     """
-    Dialog for requesting ATIS information for an airport.
+    Dialog for requesting ATIS or METAR information for an airport.
     """
 
     def __init__(self, parent):
         """
-        Initialize the ATIS dialog.
+        Initialize the weather information dialog.
 
         Args:
             parent: The parent window
         """
-        wx.Dialog.__init__(self, parent, wx.ID_ANY, "ATIS Request", size=(-1, -1))
+        wx.Dialog.__init__(self, parent, wx.ID_ANY, "Weather Information Request", size=(-1, -1))
 
         vbox = wx.BoxSizer(wx.VERTICAL)
+
+        # Request type radio buttons
+        type_label = wx.StaticText(self, label="Request type:")
+        vbox.Add(type_label, 0, wx.ALL, 5)
+
+        self.radio_atis = wx.RadioButton(self, label="ATIS", style=wx.RB_GROUP)
+        self.radio_metar = wx.RadioButton(self, label="METAR")
+        self.radio_atis.SetValue(True)
+
+        vbox.Add(self.radio_atis, 0, wx.LEFT | wx.RIGHT, 10)
+        vbox.Add(self.radio_metar, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         icao_label = wx.StaticText(self, label="Airport ICAO code:")
         vbox.Add(icao_label, 0, wx.ALL, 5)
@@ -52,9 +63,11 @@ class ATISDialog(wx.Dialog):
 
     def get_atis_details(self):
         """
-        Get the ATIS request details entered by the user.
+        Get the request details entered by the user.
 
         Returns:
-            str: The airport ICAO code in uppercase
+            tuple: (icao, request_type) where request_type is "atis" or "metar"
         """
-        return self.icao_text.GetValue().strip().upper()
+        icao = self.icao_text.GetValue().strip().upper()
+        request_type = "metar" if self.radio_metar.GetValue() else "atis"
+        return icao, request_type

@@ -187,6 +187,62 @@ class ConnectionManager:
 
         self.cnx.send_telex(recipient, message)
 
+    def send_metar_request(self, icao):
+        """Send a METAR information request via the Hoppie API.
+
+        Args:
+            icao: Airport ICAO code
+
+        Returns:
+            str: The METAR text
+
+        Raises:
+            HoppieError: If not connected or request fails
+        """
+        if not self.cnx:
+            raise HoppieError("Not connected")
+
+        # Select the appropriate API URL based on stored network type
+        if self.network_type == "hoppie":
+            api_url = HOPPIE_API_URL
+        else:
+            api_url = SAYINTENTIONS_API_URL
+
+        params = {
+            "logon": self.logon_code,
+            "from": self.callsign,
+            "to": "SERVER",
+            "type": "inforeq",
+            "packet": f"metar {icao}",
+        }
+
+        self.logger.info(f"Requesting METAR for {icao}")
+
+        try:
+            response = requests.get(api_url, params=params, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            self.logger.error(f"METAR request failed: {exc}")
+            raise HoppieError(f"METAR request failed: {exc}")
+
+        body = response.text.strip()
+
+        if body.startswith("ok "):
+            metar_text = body[3:].strip()
+            import re
+            match = re.match(r"^\{server info \{(.+)\}\}$", metar_text, re.DOTALL)
+            if match:
+                metar_text = match.group(1).strip()
+            self.logger.info(f"Received METAR for {icao}")
+            return metar_text
+        elif body.startswith("error "):
+            error_reason = body[6:].strip()
+            self.logger.error(f"METAR request error: {error_reason}")
+            raise HoppieError(f"METAR request error: {error_reason}")
+        else:
+            self.logger.error(f"Unexpected METAR response: {body}")
+            raise HoppieError(f"Unexpected response: {body}")
+
     def send_atis_request(self, icao):
         """Send an ATIS information request via the Hoppie API.
 

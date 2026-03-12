@@ -37,6 +37,9 @@ from src.gui.dialogs import (
     AltitudeChangeDialog,
     TelexDialog,
     ATISDialog,
+    DirectRequestDialog,
+    SpeedRequestDialog,
+    WhenCanWeDialog,
     show_about_dialog,
 )
 from src.utils.message_formatting import extract_message_content
@@ -169,11 +172,20 @@ class MainWindow(wx.Frame):
         menu_item_altitude_change = requests_menu.Append(
             wx.ID_ANY, "&Altitude change\tCTRL+T", "Request an altitude change."
         )
+        menu_item_direct = requests_menu.Append(
+            wx.ID_ANY, "&Direct to\tCTRL+D", "Request direct to a waypoint."
+        )
+        menu_item_speed = requests_menu.Append(
+            wx.ID_ANY, "&Speed change\tCTRL+S", "Request a speed/Mach change."
+        )
+        menu_item_when = requests_menu.Append(
+            wx.ID_ANY, "&When can we expect\tCTRL+W", "Send a when-can-we-expect inquiry."
+        )
         menu_item_telex = requests_menu.Append(
             wx.ID_ANY, "Telex &message\tCTRL+M", "Send a telex message."
         )
         menu_item_atis = requests_menu.Append(
-            wx.ID_ANY, "AT&IS\tCTRL+I", "Request ATIS information for an airport."
+            wx.ID_ANY, "AT&IS\tCTRL+I", "Request ATIS/METAR information for an airport."
         )
         menu_bar.Append(requests_menu, "&Requests")
 
@@ -188,6 +200,9 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_logon, menu_item_logon)
         self.Bind(wx.EVT_MENU, self.on_logoff, self.menu_item_logoff)
         self.Bind(wx.EVT_MENU, self.on_altitude_change, menu_item_altitude_change)
+        self.Bind(wx.EVT_MENU, self.on_direct_request, menu_item_direct)
+        self.Bind(wx.EVT_MENU, self.on_speed_request, menu_item_speed)
+        self.Bind(wx.EVT_MENU, self.on_when_can_we_expect, menu_item_when)
         self.Bind(wx.EVT_MENU, self.on_telex, menu_item_telex)
         self.Bind(wx.EVT_MENU, self.on_atis_request, menu_item_atis)
         self.Bind(wx.EVT_MENU, self.on_exit, menu_item_exit)
@@ -482,6 +497,119 @@ class MainWindow(wx.Frame):
 
         dlg.Destroy()
 
+    def on_direct_request(self, _):
+        """Send a direct-to waypoint request."""
+        if not self.connection_manager.is_connected():
+            wx.MessageBox(
+                "You must be connected to the CPDLC network to send a request.",
+                "Not Connected",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        if not self.cpdlc_session.is_logged_on():
+            wx.MessageBox(
+                "You must be logged on to a station to send a request.",
+                "Not Logged On",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        dlg = DirectRequestDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            fix, reason = dlg.get_direct_details()
+
+            success, message = self.cpdlc_session.send_direct_request(fix, reason)
+            if success:
+                if message:
+                    self._add_custom_message(message)
+                self.polling_controller.set_active_polling()
+            else:
+                error_detail = f": {message}" if message else ""
+                wx.MessageBox(
+                    f"Failed to send direct request{error_detail}.",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                )
+
+        dlg.Destroy()
+
+    def on_speed_request(self, _):
+        """Send a speed/Mach change request."""
+        if not self.connection_manager.is_connected():
+            wx.MessageBox(
+                "You must be connected to the CPDLC network to send a request.",
+                "Not Connected",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        if not self.cpdlc_session.is_logged_on():
+            wx.MessageBox(
+                "You must be logged on to a station to send a request.",
+                "Not Logged On",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        dlg = SpeedRequestDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            speed, is_mach, reason = dlg.get_speed_details()
+
+            success, message = self.cpdlc_session.send_speed_request(
+                speed, is_mach, reason
+            )
+            if success:
+                if message:
+                    self._add_custom_message(message)
+                self.polling_controller.set_active_polling()
+            else:
+                error_detail = f": {message}" if message else ""
+                wx.MessageBox(
+                    f"Failed to send speed request{error_detail}.",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                )
+
+        dlg.Destroy()
+
+    def on_when_can_we_expect(self, _):
+        """Send a when-can-we-expect inquiry."""
+        if not self.connection_manager.is_connected():
+            wx.MessageBox(
+                "You must be connected to the CPDLC network to send a request.",
+                "Not Connected",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        if not self.cpdlc_session.is_logged_on():
+            wx.MessageBox(
+                "You must be logged on to a station to send a request.",
+                "Not Logged On",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        dlg = WhenCanWeDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            message_text = dlg.get_message_text()
+
+            success, message = self.cpdlc_session.send_when_can_we_expect(message_text)
+            if success:
+                if message:
+                    self._add_custom_message(message)
+                self.polling_controller.set_active_polling()
+            else:
+                error_detail = f": {message}" if message else ""
+                wx.MessageBox(
+                    f"Failed to send request{error_detail}.",
+                    "Error",
+                    wx.OK | wx.ICON_ERROR,
+                )
+
+        dlg.Destroy()
+
     def get_current_station(self):
         """Get the current station from the CPDLC session.
 
@@ -536,18 +664,24 @@ class MainWindow(wx.Frame):
             )
             return
 
-        self.logger.debug("Opening ATIS request dialog")
+        self.logger.debug("Opening weather information request dialog")
         dlg = ATISDialog(self)
         if dlg.ShowModal() == wx.ID_OK:
-            icao = dlg.get_atis_details()
+            icao, request_type = dlg.get_atis_details()
 
-            success, result = self.cpdlc_session.request_atis(icao)
+            if request_type == "metar":
+                success, result = self.cpdlc_session.request_metar(icao)
+                label = "METAR"
+            else:
+                success, result = self.cpdlc_session.request_atis(icao)
+                label = "ATIS"
+
             if success:
-                self._add_custom_message(f"ATIS {icao}: {result}", "ATIS")
+                self._add_custom_message(f"{label} {icao}: {result}", label)
             else:
                 error_detail = f": {result}" if result else ""
                 wx.MessageBox(
-                    f"Failed to retrieve ATIS for {icao}{error_detail}.",
+                    f"Failed to retrieve {label} for {icao}{error_detail}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
@@ -621,6 +755,17 @@ class MainWindow(wx.Frame):
         Args:
             message: The received message
         """
+        # Check for protocol noise messages before adding to view
+        if hasattr(message, "get_packet_content") and hasattr(
+            message, "get_from_name"
+        ):
+            raw_content = message.get_packet_content()
+            pre_msg_text = extract_message_content(raw_content) or ""
+            pre_msg_text = " ".join(pre_msg_text.replace("@", " ").split())
+            if pre_msg_text.startswith("CURRENT ATC UNIT") or pre_msg_text.startswith("CURRENT ATS UNIT"):
+                self.logger.debug(f"Hiding protocol message: {pre_msg_text}")
+                return
+
         # Add to message manager
         message_id = self.message_manager.add_message(message)
         if message_id >= 0:
@@ -722,8 +867,10 @@ class MainWindow(wx.Frame):
             sender, min_value, response
         )
         if success:
-            # Mark as acknowledged
-            self.message_manager.mark_acknowledged(message)
+            # STANDBY sends the response but does NOT mark as acknowledged,
+            # allowing the pilot to respond again later with WILCO/UNABLE etc.
+            if response != "STANDBY":
+                self.message_manager.mark_acknowledged(message)
 
             # Add custom message only if a message was returned from the session
             if returned_message:

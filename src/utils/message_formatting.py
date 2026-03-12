@@ -22,6 +22,10 @@ def format_list_text(text):
     if not text or not isinstance(text, str):
         return text
 
+    # Replace @@ with N/A before splitting on single @
+    text = text.replace("@@", "N/A")
+    # Remove underscores (formatting artifacts from Hoppie messages)
+    text = text.replace("_", "")
     # Replace @ with spaces for a compact list display
     return text.replace("@", " ")
 
@@ -32,6 +36,10 @@ def format_message_text(text):
         return text
 
     try:
+        # Replace @@ with N/A before splitting on single @
+        text = text.replace("@@", "N/A")
+        # Remove underscores (formatting artifacts from Hoppie messages)
+        text = text.replace("_", "")
         # Split by @ characters
         segments = text.split("@")
 

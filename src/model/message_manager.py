@@ -197,11 +197,14 @@ class MessageManager:
         if rr == RR.W_U:
             responses.append("WILCO")
             responses.append("UNABLE")
+            responses.append("STANDBY")
         elif rr == RR.A_N:
             responses.append("AFFIRM")
             responses.append("NEGATIVE")
+            responses.append("STANDBY")
         elif rr == RR.R:
             responses.append("ROGER")
+            responses.append("STANDBY")
         elif rr == RR.YES:
             responses.append("YES")
             responses.append("NO")
