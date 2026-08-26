@@ -28,7 +28,12 @@ class MessageManager:
         self.logger = logger
         self.message_id_counter = 0
         self.message_log = {}  # Maps message_id to message object
-        self.acknowledged_messages = set()  # Set of (sender, message_id) tuples
+        # IDs of messages already responded to. Keyed on the ID this class
+        # assigns, not on (sender, MIN): MIN is the sending station's own
+        # counter, which restarts whenever that station re-logs on, so the
+        # same pair recurs within a single flight and would suppress the
+        # response options for a later, unrelated message.
+        self.acknowledged_messages = set()
 
     def add_message(self, message: HoppieMessage) -> int:
         """Add a HoppieMessage to the message log.
@@ -145,36 +150,32 @@ class MessageManager:
         else:
             return ""
 
-    def mark_acknowledged(self, message: CpdlcMessage):
+    def mark_acknowledged(self, message_id: int):
         """Mark a message as acknowledged.
 
         Args:
-            message: The CPDLC message that was acknowledged
+            message_id: The ID of the CPDLC message that was acknowledged
         """
-        if not isinstance(message, CpdlcMessage):
+        if not isinstance(self.message_log.get(message_id), CpdlcMessage):
             return
 
-        sender = message.get_from_name()
-        min_value = message.get_min()
-        message_key = (sender, min_value)
-        self.acknowledged_messages.add(message_key)
-        self.logger.debug(f"Marked message as acknowledged: {message_key}")
+        self.acknowledged_messages.add(message_id)
+        self.logger.debug(f"Marked message as acknowledged: ID={message_id}")
 
-    def needs_acknowledgement(self, message: HoppieMessage) -> Tuple[bool, List[str]]:
+    def needs_acknowledgement(self, message_id: int) -> Tuple[bool, List[str]]:
         """Check if a message needs acknowledgement and get valid responses.
 
         Args:
-            message: The message to check
+            message_id: The ID of the message to check
 
         Returns:
             tuple: (needs_ack, responses)
         """
-        if isinstance(message, CpdlcMessage):
-            # Create a message identifier tuple
-            message_key = (message.get_from_name(), message.get_min())
+        message = self.message_log.get(message_id)
 
+        if isinstance(message, CpdlcMessage):
             # Check if this message has already been acknowledged
-            if message_key not in self.acknowledged_messages:
+            if message_id not in self.acknowledged_messages:
                 responses = self._get_cpdlc_responses(message)
                 if responses:
                     self.logger.debug("Message needs acknowledgement.")

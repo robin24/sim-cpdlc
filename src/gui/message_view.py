@@ -106,7 +106,7 @@ class MessageView:
             return
 
         self.logger.debug(f"Checking message: {message}")
-        needs_ack, responses = self.message_manager.needs_acknowledgement(message)
+        needs_ack, responses = self.message_manager.needs_acknowledgement(message_id)
 
         if not needs_ack:
             self.logger.debug(
@@ -123,8 +123,8 @@ class MessageView:
             menu_items.append(menu_item)
             self.parent.Bind(
                 wx.EVT_MENU,
-                lambda event, resp=response, msg=message: self._handle_acknowledge(
-                    msg, resp
+                lambda event, resp=response, mid=message_id: self._handle_acknowledge(
+                    mid, resp
                 ),
                 menu_item,
             )
@@ -136,12 +136,12 @@ class MessageView:
 
         menu.Destroy()
 
-    def _handle_acknowledge(self, message: CpdlcMessage, response: str):
+    def _handle_acknowledge(self, message_id: int, response: str):
         """Handle acknowledgement of a message.
 
         Args:
-            message: The message to acknowledge
+            message_id: The ID of the message to acknowledge
             response: The response text
         """
         if self.on_acknowledge:
-            self.on_acknowledge(message, response)
+            self.on_acknowledge(message_id, response)

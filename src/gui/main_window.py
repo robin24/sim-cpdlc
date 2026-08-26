@@ -856,13 +856,18 @@ class MainWindow(wx.Frame):
                                     f"Auto-tune failed \u2014 set {freq:.3f} manually"
                                 )
 
-    def _on_acknowledge_message(self, message, response):
+    def _on_acknowledge_message(self, message_id, response):
         """Handle message acknowledgement.
 
         Args:
-            message: The message being acknowledged
+            message_id: The ID of the message being acknowledged
             response: The response text
         """
+        message = self.message_manager.get_message(message_id)
+        if message is None:
+            self.logger.warning(f"Cannot acknowledge unknown message ID {message_id}")
+            return
+
         sender = message.get_from_name()
         min_value = message.get_min()
 
@@ -873,7 +878,7 @@ class MainWindow(wx.Frame):
             # STANDBY sends the response but does NOT mark as acknowledged,
             # allowing the pilot to respond again later with WILCO/UNABLE etc.
             if response != "STANDBY":
-                self.message_manager.mark_acknowledged(message)
+                self.message_manager.mark_acknowledged(message_id)
 
             # Add custom message only if a message was returned from the session
             if returned_message:
