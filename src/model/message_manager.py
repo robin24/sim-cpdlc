@@ -14,6 +14,38 @@ from src.utils.message_formatting import (
     format_list_text,
     format_message_text,
 )
+from src.utils.weather_parsing import report_type_label
+
+
+class WeatherReport:
+    """A weather report in the message log, tagged with what it reports on.
+
+    Storing the airport and report type alongside the text lets the message
+    list offer to start or stop automatic updates for the report the user has
+    selected, rather than making them re-enter it somewhere else.
+    """
+
+    def __init__(self, text: str, icao: str, info_type: str):
+        """Initialize the weather report record.
+
+        Args:
+            text: The report text as received
+            icao: Airport ICAO code
+            info_type: Report type key (e.g. "metar", "vatatis")
+        """
+        self.text = text
+        self.icao = icao.upper()
+        self.info_type = info_type
+
+    @property
+    def label(self) -> str:
+        """Return the display name of the report type."""
+        return report_type_label(self.info_type)
+
+    @property
+    def key(self) -> Tuple[str, str]:
+        """Return the (icao, info_type) pair identifying this report."""
+        return (self.icao, self.info_type)
 
 
 class MessageManager:
@@ -76,6 +108,36 @@ class MessageManager:
         self.logger.debug(f"Added custom message: {message_text}")
         return message_id
 
+    def add_weather_message(self, text: str, icao: str, info_type: str) -> int:
+        """Add a weather report to the message log.
+
+        Args:
+            text: The report text
+            icao: Airport ICAO code
+            info_type: Report type key
+
+        Returns:
+            int: The assigned message ID
+        """
+        message_id = self.message_id_counter
+        self.message_id_counter += 1
+        self.message_log[message_id] = WeatherReport(text, icao, info_type)
+
+        self.logger.debug(f"Added {info_type} report for {icao.upper()}")
+        return message_id
+
+    def get_weather_key(self, message_id: int) -> Optional[Tuple[str, str]]:
+        """Get the (icao, info_type) pair for a weather report.
+
+        Args:
+            message_id: The message ID
+
+        Returns:
+            tuple: The report key, or None if this is not a weather report
+        """
+        message = self.message_log.get(message_id)
+        return message.key if isinstance(message, WeatherReport) else None
+
     def get_message(self, message_id: int) -> Optional[Any]:
         """Get a message by ID.
 
@@ -100,7 +162,9 @@ class MessageManager:
         if not message:
             return "", ""
 
-        if isinstance(message, HoppieMessage):
+        if isinstance(message, WeatherReport):
+            return message.label, f"{message.icao}: {' '.join(message.text.split())}"
+        elif isinstance(message, HoppieMessage):
             # For HoppieMessage objects
             sender = message.get_from_name()
             raw_content = message.get_packet_content()
@@ -111,9 +175,11 @@ class MessageManager:
             # For custom messages
             if ": " in message:
                 sender, text = message.split(": ", 1)
-                return sender, text
+                # Multi-line messages (oceanic requests, position reports) get
+                # flattened here; the detail view keeps the line breaks.
+                return sender, " ".join(text.split())
             else:
-                return "SYSTEM", message
+                return "SYSTEM", " ".join(message.split())
         else:
             return "", ""
 
@@ -130,7 +196,9 @@ class MessageManager:
         if not message:
             return ""
 
-        if isinstance(message, HoppieMessage):
+        if isinstance(message, WeatherReport):
+            return f"{message.label} {message.icao}\n\n{message.text}"
+        elif isinstance(message, HoppieMessage):
             # For HoppieMessage objects
             raw_content = message.get_packet_content()
             clean_content = extract_message_content(raw_content)

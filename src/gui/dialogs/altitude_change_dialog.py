@@ -4,6 +4,11 @@ Altitude change dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.model.cpdlc_elements import (
+    REASON_AIRCRAFT_PERFORMANCE,
+    REASON_WEATHER,
+)
+
 
 class AltitudeChangeDialog(wx.Dialog):
     """
@@ -41,7 +46,7 @@ class AltitudeChangeDialog(wx.Dialog):
 
         self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
         self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to performance")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
 
         self.reason_none.SetValue(True)
 
@@ -84,7 +89,7 @@ class AltitudeChangeDialog(wx.Dialog):
         Get the altitude details entered by the user.
 
         Returns:
-            tuple: (altitude, reason) where reason is None, "WEATHER", or "PERFORMANCE"
+            tuple: (altitude, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
         altitude = self.altitude_text.GetValue().strip()
 
@@ -94,8 +99,8 @@ class AltitudeChangeDialog(wx.Dialog):
 
         reason = None
         if self.reason_weather.GetValue():
-            reason = "WEATHER"
+            reason = REASON_WEATHER
         elif self.reason_performance.GetValue():
-            reason = "PERFORMANCE"
+            reason = REASON_AIRCRAFT_PERFORMANCE
 
         return altitude, reason

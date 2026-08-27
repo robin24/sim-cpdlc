@@ -4,6 +4,11 @@ Speed request dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.model.cpdlc_elements import (
+    REASON_AIRCRAFT_PERFORMANCE,
+    REASON_WEATHER,
+)
+
 
 class SpeedRequestDialog(wx.Dialog):
     """Dialog for requesting a speed/Mach change."""
@@ -44,7 +49,7 @@ class SpeedRequestDialog(wx.Dialog):
 
         self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
         self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to performance")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
 
         self.reason_none.SetValue(True)
 
@@ -104,7 +109,7 @@ class SpeedRequestDialog(wx.Dialog):
         """Get the speed request details.
 
         Returns:
-            tuple: (speed, is_mach, reason) where reason is None, "WEATHER", or "PERFORMANCE"
+            tuple: (speed, is_mach, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
         speed = self.speed_text.GetValue().strip()
         is_mach = self.radio_mach.GetValue()
@@ -115,8 +120,8 @@ class SpeedRequestDialog(wx.Dialog):
 
         reason = None
         if self.reason_weather.GetValue():
-            reason = "WEATHER"
+            reason = REASON_WEATHER
         elif self.reason_performance.GetValue():
-            reason = "PERFORMANCE"
+            reason = REASON_AIRCRAFT_PERFORMANCE
 
         return speed, is_mach, reason

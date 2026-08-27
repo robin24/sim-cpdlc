@@ -21,6 +21,7 @@ from src.config import (
     INACTIVITY_TIMEOUT,
     MAX_CONNECTION_FAILURES,
     MESSAGE_SOUND_FILENAME,
+    DEFAULT_WEATHER_INTERVAL_MINUTES,
     load_config,
     save_config,
 )
@@ -28,6 +29,7 @@ from src.config import (
 from src.model.connection_manager import ConnectionManager
 from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
+from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
@@ -36,13 +38,18 @@ from src.gui.dialogs import (
     PDCDialog,
     AltitudeChangeDialog,
     TelexDialog,
-    ATISDialog,
+    WeatherDialog,
+    WeatherSubscriptionsDialog,
     DirectRequestDialog,
     SpeedRequestDialog,
     WhenCanWeDialog,
+    HeadingRequestDialog,
+    ConfirmRequestDialog,
+    EmergencyDialog,
     show_about_dialog,
 )
 from src.utils.message_formatting import extract_message_content
+from src.utils.weather_parsing import report_type_label
 from src.utils.update_checker import UpdateChecker
 from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
@@ -111,6 +118,18 @@ class MainWindow(wx.Frame):
             INACTIVITY_TIMEOUT,
         )
 
+        # Initialize automatic weather updates
+        interval_minutes = config.get(
+            "weather_update_interval", DEFAULT_WEATHER_INTERVAL_MINUTES
+        )
+        self.weather_monitor = WeatherMonitor(
+            logger,
+            self.connection_manager,
+            self._on_weather_update,
+            self._on_weather_error,
+            interval_ms=interval_minutes * 60000,
+        )
+
         # Bind the close event to handle ALT+F4 and other direct close operations
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
@@ -124,7 +143,12 @@ class MainWindow(wx.Frame):
 
         # Create message view
         self.message_view = MessageView(
-            self.panel, self.logger, self.message_manager, self._on_acknowledge_message
+            self.panel,
+            self.logger,
+            self.message_manager,
+            self._on_acknowledge_message,
+            self._on_toggle_weather_updates,
+            self._is_weather_watched,
         )
 
         # Create status bar
@@ -160,7 +184,7 @@ class MainWindow(wx.Frame):
         # Requests menu
         requests_menu = wx.Menu()
         menu_item_pdc = requests_menu.Append(
-            wx.ID_ANY, "&PDC", "Request a pre-departure clearance"
+            wx.ID_ANY, "&PDC\tCTRL+P", "Request a pre-departure clearance"
         )
         menu_item_logon = requests_menu.Append(
             wx.ID_ANY, "&Logon\tCTRL+L", "Logon to a CPDLC station."
@@ -181,13 +205,44 @@ class MainWindow(wx.Frame):
         menu_item_when = requests_menu.Append(
             wx.ID_ANY, "&When can we expect\tCTRL+W", "Send a when-can-we-expect inquiry."
         )
+        menu_item_heading = requests_menu.Append(
+            wx.ID_ANY, "&Heading\tCTRL+H", "Request a heading."
+        )
+        menu_item_confirm = requests_menu.Append(
+            wx.ID_ANY,
+            "&Confirm assigned\tCTRL+SHIFT+C",
+            "Ask the station to confirm an assigned level or speed.",
+        )
         menu_item_telex = requests_menu.Append(
             wx.ID_ANY, "Telex &message\tCTRL+M", "Send a telex message."
         )
-        menu_item_atis = requests_menu.Append(
-            wx.ID_ANY, "AT&IS\tCTRL+I", "Request ATIS/METAR information for an airport."
-        )
         menu_bar.Append(requests_menu, "&Requests")
+
+        # Weather menu
+        weather_menu = wx.Menu()
+        menu_item_weather = weather_menu.Append(
+            wx.ID_ANY,
+            "&Weather request\tCTRL+I",
+            "Request a METAR, TAF or ATIS for an airport.",
+        )
+        menu_item_weather_subs = weather_menu.Append(
+            wx.ID_ANY,
+            "&Automatic weather updates\tCTRL+SHIFT+I",
+            "Show and manage the reports being kept up to date.",
+        )
+        menu_bar.Append(weather_menu, "&Weather")
+
+        # Emergency menu
+        emergency_menu = wx.Menu()
+        menu_item_emergency = emergency_menu.Append(
+            wx.ID_ANY, "&Declare emergency", "Declare a MAYDAY or PAN PAN."
+        )
+        menu_item_cancel_emergency = emergency_menu.Append(
+            wx.ID_ANY,
+            "&Cancel emergency",
+            "Tell the station a previously declared emergency is over.",
+        )
+        menu_bar.Append(emergency_menu, "&Emergency")
 
         self.SetMenuBar(menu_bar)
 
@@ -203,8 +258,17 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_direct_request, menu_item_direct)
         self.Bind(wx.EVT_MENU, self.on_speed_request, menu_item_speed)
         self.Bind(wx.EVT_MENU, self.on_when_can_we_expect, menu_item_when)
+        self.Bind(wx.EVT_MENU, self.on_heading_request, menu_item_heading)
+        self.Bind(wx.EVT_MENU, self.on_confirm_request, menu_item_confirm)
         self.Bind(wx.EVT_MENU, self.on_telex, menu_item_telex)
-        self.Bind(wx.EVT_MENU, self.on_atis_request, menu_item_atis)
+        self.Bind(wx.EVT_MENU, self.on_weather_request, menu_item_weather)
+        self.Bind(
+            wx.EVT_MENU, self.on_weather_subscriptions, menu_item_weather_subs
+        )
+        self.Bind(wx.EVT_MENU, self.on_declare_emergency, menu_item_emergency)
+        self.Bind(
+            wx.EVT_MENU, self.on_cancel_emergency, menu_item_cancel_emergency
+        )
         self.Bind(wx.EVT_MENU, self.on_exit, menu_item_exit)
 
     def on_settings(self, _):
@@ -218,6 +282,9 @@ class MainWindow(wx.Frame):
         current_simbrief_userid = config.get("simbrief_userid", "")
         current_auto_check_updates = config.get("auto_check_updates", True)
         current_auto_tune_com1 = config.get("auto_tune_com1", True)
+        current_weather_interval = config.get(
+            "weather_update_interval", DEFAULT_WEATHER_INTERVAL_MINUTES
+        )
 
         dlg = SettingsDialog(
             self,
@@ -226,6 +293,7 @@ class MainWindow(wx.Frame):
             current_simbrief_userid,
             current_auto_check_updates,
             current_auto_tune_com1,
+            current_weather_interval,
         )
         if dlg.ShowModal() == wx.ID_OK:
             # Get the new settings
@@ -235,6 +303,7 @@ class MainWindow(wx.Frame):
                 new_simbrief_userid,
                 new_auto_check_updates,
                 new_auto_tune_com1,
+                new_weather_interval,
             ) = dlg.get_settings()
             self.logger.debug("Saving new settings")
 
@@ -244,6 +313,8 @@ class MainWindow(wx.Frame):
             config["simbrief_userid"] = new_simbrief_userid
             config["auto_check_updates"] = new_auto_check_updates
             config["auto_tune_com1"] = new_auto_tune_com1
+            config["weather_update_interval"] = new_weather_interval
+            self.weather_monitor.set_interval(new_weather_interval * 60000)
             if save_config(config):
                 self.logger.info("Settings saved successfully")
                 wx.MessageBox(
@@ -297,8 +368,9 @@ class MainWindow(wx.Frame):
                     wx.OK | wx.ICON_ERROR,
                 )
             else:
-                # Start polling
+                # Start polling and automatic weather updates
                 self.polling_controller.start(self)
+                self.weather_monitor.start(self)
 
                 # Set callsign in session
                 self.cpdlc_session.set_callsign(callsign)
@@ -352,8 +424,10 @@ class MainWindow(wx.Frame):
             # Small delay to allow the message to be sent
             wx.MilliSleep(500)  # 500ms delay
 
-        # Stop polling
+        # Stop polling and automatic weather updates
         self.polling_controller.stop()
+        self.weather_monitor.stop()
+        self.weather_monitor.clear()
 
         # Disconnect
         self.connection_manager.disconnect()
@@ -654,30 +728,180 @@ class MainWindow(wx.Frame):
 
         dlg.Destroy()
 
-    def on_atis_request(self, _):
-        """Request ATIS information for an airport."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to request ATIS.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
+    def _require_connection(self, action):
+        """Check we are connected, telling the user if we are not.
+
+        Args:
+            action: What the user was trying to do, for the message text
+
+        Returns:
+            bool: True if connected
+        """
+        if self.connection_manager.is_connected():
+            return True
+
+        wx.MessageBox(
+            f"You must be connected to the CPDLC network to {action}.",
+            "Not Connected",
+            wx.OK | wx.ICON_INFORMATION,
+        )
+        return False
+
+    def _require_station(self, action):
+        """Check we are connected and logged on, telling the user if we are not.
+
+        Args:
+            action: What the user was trying to do, for the message text
+
+        Returns:
+            bool: True if connected and logged on to a station
+        """
+        if not self._require_connection(action):
+            return False
+
+        if self.cpdlc_session.is_logged_on():
+            return True
+
+        wx.MessageBox(
+            f"You must be logged on to a station to {action}.",
+            "Not Logged On",
+            wx.OK | wx.ICON_INFORMATION,
+        )
+        return False
+
+    def _handle_request_result(self, success, message, description):
+        """Log a sent request in the message list, or report why it failed.
+
+        Args:
+            success: Whether the request was sent
+            message: The sent message text, or the error description
+            description: Short phrase naming the request, for the error dialog
+        """
+        if success:
+            if message:
+                self._add_custom_message(message)
+            self.polling_controller.set_active_polling()
+            return
+
+        error_detail = f": {message}" if message else ""
+        wx.MessageBox(
+            f"Failed to send {description}{error_detail}.",
+            "Error",
+            wx.OK | wx.ICON_ERROR,
+        )
+
+    def on_heading_request(self, _):
+        """Request a heading from the current station."""
+        if not self._require_station("request a heading"):
+            return
+
+        dlg = HeadingRequestDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            success, message = self.cpdlc_session.send_heading_request(
+                dlg.get_heading()
             )
+            self._handle_request_result(success, message, "heading request")
+
+        dlg.Destroy()
+
+    def on_confirm_request(self, _):
+        """Ask the station to confirm an assigned level or speed."""
+        if not self._require_station("send a request"):
+            return
+
+        dlg = ConfirmRequestDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            success, message = self.cpdlc_session.send_query(dlg.get_message())
+            self._handle_request_result(success, message, "request")
+
+        dlg.Destroy()
+
+    def on_declare_emergency(self, _):
+        """Declare a MAYDAY or PAN PAN over CPDLC."""
+        if not self._require_station("declare an emergency"):
+            return
+
+        dlg = EmergencyDialog(self)
+        if dlg.ShowModal() == wx.ID_OK:
+            (
+                is_mayday,
+                fuel,
+                souls,
+                diverting_to,
+                via_route,
+                free_text,
+            ) = dlg.get_emergency_details()
+
+            success, message = self.cpdlc_session.send_emergency(
+                is_mayday, fuel, souls, diverting_to, via_route, free_text
+            )
+            self._handle_request_result(success, message, "emergency declaration")
+
+        dlg.Destroy()
+
+    def on_cancel_emergency(self, _):
+        """Cancel a previously declared emergency."""
+        if not self._require_station("cancel an emergency"):
+            return
+
+        if (
+            wx.MessageBox(
+                "Send CANCEL EMERGENCY to the current station?",
+                "Confirm",
+                wx.YES_NO | wx.ICON_QUESTION,
+            )
+            != wx.YES
+        ):
+            return
+
+        success, message = self.cpdlc_session.send_cancel_emergency()
+        self._handle_request_result(success, message, "emergency cancellation")
+
+    def on_weather_request(self, _):
+        """Request a METAR, TAF or ATIS, optionally keeping it up to date."""
+        if not self._require_connection("request weather information"):
             return
 
         self.logger.debug("Opening weather information request dialog")
-        dlg = ATISDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
-            icao, request_type = dlg.get_atis_details()
 
-            if request_type == "metar":
-                success, result = self.cpdlc_session.request_metar(icao)
-                label = "METAR"
-            else:
-                success, result = self.cpdlc_session.request_atis(icao)
-                label = "ATIS"
+        config = load_config()
+        dlg = WeatherDialog(
+            self,
+            config.get("weather_report_type", "vatatis"),
+            is_watched=self._is_weather_watched,
+        )
+
+        if dlg.ShowModal() == wx.ID_OK:
+            icao, info_type, auto_update = dlg.get_weather_details()
+
+            # Remember the report type so the next request opens on it.
+            if config.get("weather_report_type") != info_type:
+                config["weather_report_type"] = info_type
+                save_config(config)
+
+            label = report_type_label(info_type)
+            was_watched = self.weather_monitor.is_subscribed(icao, info_type)
+
+            # Unticking the box is how the user stops updates, so act on it
+            # whether or not this request succeeds.
+            if was_watched and not auto_update:
+                self.weather_monitor.unsubscribe(icao, info_type)
+                self._add_custom_message(
+                    f"Stopped automatic updates for {label} {icao}", "SYSTEM"
+                )
+
+            success, result = self.cpdlc_session.request_weather(info_type, icao)
 
             if success:
-                self._add_custom_message(f"{label} {icao}: {result}", label)
+                self._add_weather_message(result, icao, info_type)
+
+                # Only start watching a report we know we can actually fetch.
+                if auto_update:
+                    self.weather_monitor.subscribe(icao, info_type, initial_text=result)
+                    if not was_watched:
+                        self._add_custom_message(
+                            f"Now watching {label} {icao} for changes", "SYSTEM"
+                        )
             else:
                 error_detail = f": {result}" if result else ""
                 wx.MessageBox(
@@ -687,6 +911,45 @@ class MainWindow(wx.Frame):
                 )
 
         dlg.Destroy()
+
+    def on_weather_subscriptions(self, _):
+        """Show and manage the reports being kept up to date."""
+        if self.weather_monitor.count() == 0:
+            wx.MessageBox(
+                "No reports are being kept up to date. Tick "
+                "'Keep this report updated automatically' when you request a "
+                "METAR, TAF or ATIS to start watching one.",
+                "Automatic Weather Updates",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+            return
+
+        dlg = WeatherSubscriptionsDialog(self, self.weather_monitor)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def _on_weather_update(self, subscription, text, description):
+        """Announce a weather report that has changed.
+
+        Args:
+            subscription: The WeatherSubscription that changed
+            text: The new report text
+            description: A short description of the new report
+        """
+        self._add_weather_message(text, subscription.icao, subscription.info_type)
+        self.SetStatusText(f"New {description}")
+
+    def _on_weather_error(self, subscription, error):
+        """Report that automatic updates have been given up on.
+
+        Args:
+            subscription: The WeatherSubscription that was dropped
+            error: The last error description
+        """
+        self._add_custom_message(
+            f"Stopped automatic updates for {subscription.describe()}: {error}",
+            "SYSTEM",
+        )
 
     def on_pdc_request(self, _):
         """Request a pre-departure clearance from departure airport."""
@@ -733,12 +996,65 @@ class MainWindow(wx.Frame):
 
         dlg.Destroy()
 
-    def _add_custom_message(self, text, sender=None):
+    def _add_weather_message(self, text, icao, info_type):
+        """Add a weather report to the message list and play the sound.
+
+        Tagging the report with its airport and type lets the context menu on
+        it start or stop automatic updates without retyping anything.
+
+        Args:
+            text: The report text
+            icao: Airport ICAO code
+            info_type: Report type key
+        """
+        message_id = self.message_manager.add_weather_message(text, icao, info_type)
+        self.message_view.add_message(message_id)
+        self._play_message_sound()
+
+    def _is_weather_watched(self, icao, info_type):
+        """Check whether a report is being kept up to date.
+
+        Args:
+            icao: Airport ICAO code
+            info_type: Report type key
+
+        Returns:
+            bool: True if the report is being watched
+        """
+        return self.weather_monitor.is_subscribed(icao, info_type)
+
+    def _on_toggle_weather_updates(self, icao, info_type):
+        """Start or stop automatic updates for a report.
+
+        Args:
+            icao: Airport ICAO code
+            info_type: Report type key
+        """
+        label = report_type_label(info_type)
+
+        if self.weather_monitor.is_subscribed(icao, info_type):
+            self.weather_monitor.unsubscribe(icao, info_type)
+            self._add_custom_message(
+                f"Stopped automatic updates for {label} {icao}", "SYSTEM"
+            )
+            self.SetStatusText(f"Stopped watching {label} {icao}.")
+            return
+
+        self.weather_monitor.subscribe(icao, info_type)
+        self._add_custom_message(
+            f"Now watching {label} {icao} for changes", "SYSTEM"
+        )
+        self.SetStatusText(f"Watching {label} {icao}.")
+
+    def _add_custom_message(self, text, sender=None, play_sound=False):
         """Add a custom message to the message list.
 
         Args:
             text: Message text
             sender: Optional sender name (defaults to current callsign)
+            play_sound: Whether to play the notification sound. Off for
+                outgoing and system messages, on for information that arrives
+                from the network such as weather reports.
         """
         if sender is None:
             sender = self.cpdlc_session.get_callsign()
@@ -746,8 +1062,8 @@ class MainWindow(wx.Frame):
         message_id = self.message_manager.add_custom_message(text, sender)
         self.message_view.add_message(message_id)
 
-        # Don't play sound for outgoing messages (from user's callsign) or system messages
-        # Sound should only play for incoming messages, which are handled in _on_message_received
+        if play_sound:
+            self._play_message_sound()
 
     def _on_message_received(self, message):
         """Handle received messages from the network.
@@ -915,6 +1231,7 @@ class MainWindow(wx.Frame):
             # Stop polling
             self.polling_controller.stop()
 
+        self.weather_monitor.shutdown()
         self.simconnect_manager.disconnect()
         self.logger.info("Application shutting down")
         event.Skip()  # Allow the window to close

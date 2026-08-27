@@ -157,7 +157,7 @@ class CpdlcSession:
 
         Args:
             altitude: The requested altitude (e.g. "FL350")
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text) where success is True if request sent successfully,
@@ -264,7 +264,7 @@ class CpdlcSession:
 
         Args:
             fix: The waypoint/fix name
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text)
@@ -301,7 +301,7 @@ class CpdlcSession:
         Args:
             speed: The speed value (e.g. "082" for Mach, "300" for knots)
             is_mach: True for Mach, False for knots
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text)
@@ -490,3 +490,143 @@ class CpdlcSession:
             return False, str(exc)
 
         return True, message
+
+    # ------------------------------------------------------------------
+    # Additional FANS-1/A downlink requests
+    # ------------------------------------------------------------------
+
+    def _send_to_station(
+        self, message: str, rr: RR = RR.YES, description: str = "request"
+    ) -> Tuple[bool, Optional[str]]:
+        """Send a CPDLC message to the station we are currently logged on to.
+
+        Shared plumbing for the downlink requests below: it enforces the
+        connection/logon preconditions, sends the message and advances the MIN
+        counter, so each caller only has to build its message text.
+
+        Args:
+            message: The fully-formed message text
+            rr: Response requirement for the message
+            description: Short phrase used in log lines
+
+        Returns:
+            tuple: (success, message_or_error) where success is True and
+                  message_or_error is the sent text, or success is False and
+                  message_or_error is an error description (or None for
+                  precondition failures)
+        """
+        if not self.current_station or not self.connection_manager.is_connected():
+            self.logger.warning(
+                f"{description.capitalize()} attempted without active station or connection"
+            )
+            return False, None
+
+        self.logger.info(f"Sending {description}: {message}")
+
+        try:
+            self.connection_manager.send_cpdlc(
+                self.current_station,
+                self.cpdlc_min_counter,
+                rr.value,
+                message,
+            )
+        except HoppieError as exc:
+            self.logger.error(f"Failed to send {description}: {exc}")
+            return False, str(exc)
+
+        self.cpdlc_min_counter += 1
+        return True, message
+
+    def request_weather(self, info_type: str, icao: str) -> Tuple[bool, Optional[str]]:
+        """Request a weather/information report for an airport.
+
+        Args:
+            info_type: Report type key ("metar", "taf", "shorttaf", "vatatis", ...)
+            icao: Airport ICAO code
+
+        Returns:
+            tuple: (success, report_text_or_error)
+        """
+        if not self.connection_manager.is_connected():
+            self.logger.warning("Weather request attempted without active connection")
+            return False, None
+
+        try:
+            return True, self.connection_manager.send_info_request(info_type, icao)
+        except HoppieError as exc:
+            self.logger.error(f"Failed to request {info_type} for {icao}: {exc}")
+            return False, str(exc)
+
+    def send_heading_request(self, degrees: str) -> Tuple[bool, Optional[str]]:
+        """Send a heading request (DM70).
+
+        Args:
+            degrees: Three-digit heading, e.g. "270"
+
+        Returns:
+            tuple: (success, message_text_or_error)
+        """
+        return self._send_to_station(
+            f"REQUEST HEADING {degrees}", RR.YES, "heading request"
+        )
+
+    def send_query(self, text: str) -> Tuple[bool, Optional[str]]:
+        """Send a query that expects an answer from the station.
+
+        Args:
+            text: The query text, e.g. "CONFIRM ASSIGNED LEVEL"
+
+        Returns:
+            tuple: (success, message_text_or_error)
+        """
+        return self._send_to_station(text, RR.YES, "query")
+
+    def send_emergency(
+        self,
+        is_mayday: bool,
+        fuel_remaining: Optional[str] = None,
+        souls_on_board: Optional[str] = None,
+        diverting_to: Optional[str] = None,
+        via_route: Optional[str] = None,
+        free_text: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Declare an emergency (DM55/DM56, with DM57 and DM59 detail).
+
+        Args:
+            is_mayday: True for MAYDAY, False for PAN PAN
+            fuel_remaining: Optional fuel remaining, e.g. "0230" (hhmm)
+            souls_on_board: Optional number of people on board
+            diverting_to: Optional diversion destination
+            via_route: Optional routeing for the diversion
+            free_text: Optional additional detail
+
+        Returns:
+            tuple: (success, message_text_or_error)
+        """
+        lines = ["MAYDAY MAYDAY MAYDAY" if is_mayday else "PAN PAN PAN"]
+
+        if fuel_remaining and souls_on_board:
+            lines.append(
+                f"{fuel_remaining} OF FUEL REMAINING AND {souls_on_board} SOULS ON BOARD"
+            )
+
+        if diverting_to:
+            diversion = f"DIVERTING TO {diverting_to}"
+            if via_route:
+                diversion += f" VIA {via_route}"
+            lines.append(diversion)
+
+        if free_text:
+            lines.append(free_text)
+
+        return self._send_to_station("\n".join(lines), RR.YES, "emergency declaration")
+
+    def send_cancel_emergency(self) -> Tuple[bool, Optional[str]]:
+        """Cancel a previously declared emergency (DM58).
+
+        Returns:
+            tuple: (success, message_text_or_error)
+        """
+        return self._send_to_station(
+            "CANCEL EMERGENCY", RR.YES, "emergency cancellation"
+        )

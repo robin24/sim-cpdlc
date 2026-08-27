@@ -1,12 +1,17 @@
 """Connection management for the CPDLC client."""
 
 import logging
+import re
 import wx
 import requests
 
 from hoppie_connector import HoppieConnector, HoppieError
 
 from src.config import SAYINTENTIONS_API_URL, HOPPIE_API_URL
+from src.utils.weather_parsing import report_type_label, report_type_packet
+
+# Hoppie wraps information responses as: {server info {actual text}}
+_SERVER_INFO_PATTERN = re.compile(r"^\{server info \{(.+)\}\}$", re.DOTALL)
 
 
 class ConnectionManager:
@@ -187,8 +192,77 @@ class ConnectionManager:
 
         self.cnx.send_telex(recipient, message)
 
+    def _resolve_api_url(self):
+        """Return the API URL matching the currently connected network."""
+        if self.network_type == "hoppie":
+            return HOPPIE_API_URL
+        return SAYINTENTIONS_API_URL
+
+    def send_info_request(self, info_type, icao):
+        """Fetch a weather/information report via the Hoppie "inforeq" interface.
+
+        Made as a direct HTTP GET because hoppie_connector does not model the
+        inforeq message type. Blocking — callers that run on a timer should
+        invoke this from a worker thread.
+
+        Args:
+            info_type: Report type key (e.g. "metar", "taf", "vatatis")
+            icao: Airport ICAO code
+
+        Returns:
+            str: The report text
+
+        Raises:
+            HoppieError: If not connected or the request fails
+        """
+        if not self.cnx:
+            raise HoppieError("Not connected")
+
+        packet_type = report_type_packet(info_type)
+        label = report_type_label(info_type)
+
+        params = {
+            "logon": self.logon_code,
+            "from": self.callsign,
+            "to": "SERVER",
+            "type": "inforeq",
+            "packet": f"{packet_type} {icao}",
+        }
+
+        self.logger.info(f"Requesting {label} for {icao}")
+
+        try:
+            response = requests.get(self._resolve_api_url(), params=params, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            self.logger.error(f"{label} request failed: {exc}")
+            raise HoppieError(f"{label} request failed: {exc}")
+
+        body = response.text.strip()
+
+        if body.startswith("ok "):
+            report_text = body[3:].strip()
+            # Response is wrapped as {server info {actual text}} — extract inner content
+            match = _SERVER_INFO_PATTERN.match(report_text)
+            if match:
+                report_text = match.group(1).strip()
+
+            if not report_text:
+                self.logger.warning(f"Empty {label} response for {icao}")
+                raise HoppieError(f"No {label} available for {icao}")
+
+            self.logger.info(f"Received {label} for {icao}")
+            return report_text
+        elif body.startswith("error "):
+            error_reason = body[6:].strip()
+            self.logger.error(f"{label} request error: {error_reason}")
+            raise HoppieError(f"{label} request error: {error_reason}")
+        else:
+            self.logger.error(f"Unexpected {label} response: {body}")
+            raise HoppieError(f"Unexpected response: {body}")
+
     def send_metar_request(self, icao):
-        """Send a METAR information request via the Hoppie API.
+        """Send a METAR information request.
 
         Args:
             icao: Airport ICAO code
@@ -199,59 +273,14 @@ class ConnectionManager:
         Raises:
             HoppieError: If not connected or request fails
         """
-        if not self.cnx:
-            raise HoppieError("Not connected")
+        return self.send_info_request("metar", icao)
 
-        # Select the appropriate API URL based on stored network type
-        if self.network_type == "hoppie":
-            api_url = HOPPIE_API_URL
-        else:
-            api_url = SAYINTENTIONS_API_URL
-
-        params = {
-            "logon": self.logon_code,
-            "from": self.callsign,
-            "to": "SERVER",
-            "type": "inforeq",
-            "packet": f"metar {icao}",
-        }
-
-        self.logger.info(f"Requesting METAR for {icao}")
-
-        try:
-            response = requests.get(api_url, params=params, timeout=15)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            self.logger.error(f"METAR request failed: {exc}")
-            raise HoppieError(f"METAR request failed: {exc}")
-
-        body = response.text.strip()
-
-        if body.startswith("ok "):
-            metar_text = body[3:].strip()
-            import re
-            match = re.match(r"^\{server info \{(.+)\}\}$", metar_text, re.DOTALL)
-            if match:
-                metar_text = match.group(1).strip()
-            self.logger.info(f"Received METAR for {icao}")
-            return metar_text
-        elif body.startswith("error "):
-            error_reason = body[6:].strip()
-            self.logger.error(f"METAR request error: {error_reason}")
-            raise HoppieError(f"METAR request error: {error_reason}")
-        else:
-            self.logger.error(f"Unexpected METAR response: {body}")
-            raise HoppieError(f"Unexpected response: {body}")
-
-    def send_atis_request(self, icao):
-        """Send an ATIS information request via the Hoppie API.
-
-        Makes a direct HTTP GET request since hoppie_connector doesn't
-        support the inforeq message type. Always uses Hoppie's API since
-        vatatis is a Hoppie-specific feature.
+    def send_atis_request(self, icao, source="vatatis"):
+        """Send an ATIS information request.
 
         Args:
             icao: Airport ICAO code
+            source: ATIS source key ("vatatis", "ivaoatis" or "peatis")
 
         Returns:
             str: The ATIS text
@@ -259,47 +288,4 @@ class ConnectionManager:
         Raises:
             HoppieError: If not connected or request fails
         """
-        if not self.cnx:
-            raise HoppieError("Not connected")
-
-        # Select the appropriate API URL based on stored network type
-        if self.network_type == "hoppie":
-            api_url = HOPPIE_API_URL
-        else:
-            api_url = SAYINTENTIONS_API_URL
-
-        params = {
-            "logon": self.logon_code,
-            "from": self.callsign,
-            "to": "SERVER",
-            "type": "inforeq",
-            "packet": f"vatatis {icao}",
-        }
-
-        self.logger.info(f"Requesting ATIS for {icao}")
-
-        try:
-            response = requests.get(api_url, params=params, timeout=15)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            self.logger.error(f"ATIS request failed: {exc}")
-            raise HoppieError(f"ATIS request failed: {exc}")
-
-        body = response.text.strip()
-
-        if body.startswith("ok "):
-            atis_text = body[3:].strip()
-            # Response is wrapped as {server info {actual text}} — extract inner content
-            import re
-            match = re.match(r"^\{server info \{(.+)\}\}$", atis_text, re.DOTALL)
-            if match:
-                atis_text = match.group(1).strip()
-            self.logger.info(f"Received ATIS for {icao}")
-            return atis_text
-        elif body.startswith("error "):
-            error_reason = body[6:].strip()
-            self.logger.error(f"ATIS request error: {error_reason}")
-            raise HoppieError(f"ATIS request error: {error_reason}")
-        else:
-            self.logger.error(f"Unexpected ATIS response: {body}")
-            raise HoppieError(f"Unexpected response: {body}")
+        return self.send_info_request(source, icao)

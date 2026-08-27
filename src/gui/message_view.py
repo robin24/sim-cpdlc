@@ -3,14 +3,20 @@
 import wx
 
 from hoppie_connector import HoppieMessage, CpdlcMessage
-from src.model.message_manager import MessageManager
+from src.model.message_manager import MessageManager, WeatherReport
 
 
 class MessageView:
     """Handles display and interaction with CPDLC messages."""
 
     def __init__(
-        self, parent, logger, message_manager: MessageManager, on_acknowledge=None
+        self,
+        parent,
+        logger,
+        message_manager: MessageManager,
+        on_acknowledge=None,
+        on_toggle_weather_updates=None,
+        is_weather_watched=None,
     ):
         """Initialize the message view.
 
@@ -19,11 +25,17 @@ class MessageView:
             logger: Application logger
             message_manager: Message manager instance
             on_acknowledge: Callback for message acknowledgement
+            on_toggle_weather_updates: Callback(icao, info_type) to start or
+                stop automatic updates for a weather report
+            is_weather_watched: Callable(icao, info_type) returning whether a
+                report is currently being kept up to date
         """
         self.parent = parent
         self.logger = logger
         self.message_manager = message_manager
         self.on_acknowledge = on_acknowledge
+        self.on_toggle_weather_updates = on_toggle_weather_updates
+        self.is_weather_watched = is_weather_watched
 
         self._init_ui()
 
@@ -101,6 +113,12 @@ class MessageView:
         message_id = self.message_list.GetItemData(selected_index)
         message = self.message_manager.get_message(message_id)
 
+        # Weather reports get their own menu, so automatic updates can be
+        # started or stopped from the report itself.
+        if isinstance(message, WeatherReport):
+            self._show_weather_menu(message)
+            return
+
         if not isinstance(message, HoppieMessage):
             self.logger.debug(f"Selected item (ID={message_id}) is not a HoppieMessage")
             return
@@ -134,6 +152,42 @@ class MessageView:
         for menu_item in menu_items:
             self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
 
+        menu.Destroy()
+
+    def _show_weather_menu(self, report: WeatherReport):
+        """Show the context menu for a weather report.
+
+        Args:
+            report: The selected WeatherReport
+        """
+        if not self.on_toggle_weather_updates:
+            return
+
+        watched = bool(
+            self.is_weather_watched
+            and self.is_weather_watched(report.icao, report.info_type)
+        )
+
+        label = (
+            f"Stop automatic updates for {report.label} {report.icao}"
+            if watched
+            else f"Start automatic updates for {report.label} {report.icao}"
+        )
+        self.logger.debug(f"Showing weather context menu: {label}")
+
+        menu = wx.Menu()
+        menu_item = menu.Append(wx.ID_ANY, label)
+        self.parent.Bind(
+            wx.EVT_MENU,
+            lambda event, r=report: self.on_toggle_weather_updates(
+                r.icao, r.info_type
+            ),
+            menu_item,
+        )
+
+        self.parent.PopupMenu(menu)
+
+        self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
         menu.Destroy()
 
     def _handle_acknowledge(self, message: CpdlcMessage, response: str):

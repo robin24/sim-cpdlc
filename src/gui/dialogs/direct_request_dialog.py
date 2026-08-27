@@ -4,6 +4,11 @@ Direct-to request dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.model.cpdlc_elements import (
+    REASON_AIRCRAFT_PERFORMANCE,
+    REASON_WEATHER,
+)
+
 
 class DirectRequestDialog(wx.Dialog):
     """Dialog for requesting direct-to a waypoint/fix."""
@@ -32,7 +37,7 @@ class DirectRequestDialog(wx.Dialog):
 
         self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
         self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to performance")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
 
         self.reason_none.SetValue(True)
 
@@ -66,14 +71,14 @@ class DirectRequestDialog(wx.Dialog):
         """Get the direct-to request details.
 
         Returns:
-            tuple: (fix, reason) where reason is None, "WEATHER", or "PERFORMANCE"
+            tuple: (fix, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
         fix = self.fix_text.GetValue().strip().upper()
 
         reason = None
         if self.reason_weather.GetValue():
-            reason = "WEATHER"
+            reason = REASON_WEATHER
         elif self.reason_performance.GetValue():
-            reason = "PERFORMANCE"
+            reason = REASON_AIRCRAFT_PERFORMANCE
 
         return fix, reason

@@ -34,6 +34,8 @@ DEFAULT_CONFIG = {
     "simbrief_userid": "",
     "auto_check_updates": True,  # Enable automatic update checks by default
     "auto_tune_com1": True,  # Auto-tune COM1 standby on CONTACT/MONITOR messages
+    "weather_update_interval": 5,  # Minutes between automatic weather re-checks
+    "weather_report_type": "vatatis",  # Report type preselected in the weather dialog
 }
 
 
@@ -95,13 +97,24 @@ def save_config(config):
 SAYINTENTIONS_API_URL = "http://acars.sayintentions.ai/acars/system/connect.html"
 HOPPIE_API_URL = "http://www.hoppie.nl/acars/system/connect.html"
 
-# Polling configuration (in milliseconds)
-DEFAULT_POLL_INTERVAL = 60000  # 60 seconds
-ACTIVE_POLL_INTERVAL = 20000  # 20 seconds
+# Polling configuration (in milliseconds).
+# Hoppie asks for a poll "once between every 45 and 75 seconds, randomly timed
+# so that the average server load is stable", rising to once per 20 seconds
+# while a reply is expected. Each idle poll is randomised within this band.
+MIN_POLL_INTERVAL = 45000  # 45 seconds
+MAX_POLL_INTERVAL = 75000  # 75 seconds
+DEFAULT_POLL_INTERVAL = 60000  # 60 seconds, the average of the band above
+ACTIVE_POLL_INTERVAL = 20000  # 20 seconds, the fastest rate Hoppie permits
 INACTIVITY_TIMEOUT = 300000  # 5 minutes
 
 # Maximum connection failures before attempting reconnection
 MAX_CONNECTION_FAILURES = 3
+
+# Automatic weather updates. The interval is a re-request on a timer rather
+# than a push from the network, so keep it gentle on the ACARS servers.
+DEFAULT_WEATHER_INTERVAL_MINUTES = 5
+MIN_WEATHER_INTERVAL_MINUTES = 1
+MAX_WEATHER_INTERVAL_MINUTES = 60
 
 # Sound file path
 MESSAGE_SOUND_FILENAME = "message.wav"
