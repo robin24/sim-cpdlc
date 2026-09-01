@@ -237,6 +237,29 @@ class CpdlcSession:
         self.cpdlc_min_counter += 1
         return True, response
 
+    def _request_info(self, icao: str, label: str, send) -> Tuple[bool, Optional[str]]:
+        """Run an information request and normalise the result.
+
+        Args:
+            icao: Airport ICAO code
+            label: Human-readable request name for log messages
+            send: Callable taking the ICAO code and returning the response text
+
+        Returns:
+            tuple: (success, text_or_error)
+        """
+        if not self.connection_manager.is_connected():
+            self.logger.warning(
+                f"{label} request attempted without active connection"
+            )
+            return False, None
+
+        try:
+            return True, send(icao)
+        except HoppieError as exc:
+            self.logger.error(f"Failed to request {label} for {icao}: {exc}")
+            return False, str(exc)
+
     def request_atis(self, icao: str) -> Tuple[bool, Optional[str]]:
         """Request ATIS information for an airport.
 
@@ -246,16 +269,9 @@ class CpdlcSession:
         Returns:
             tuple: (success, atis_text_or_error)
         """
-        if not self.connection_manager.is_connected():
-            self.logger.warning("ATIS request attempted without active connection")
-            return False, None
-
-        try:
-            atis_text = self.connection_manager.send_atis_request(icao)
-            return True, atis_text
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request ATIS for {icao}: {exc}")
-            return False, str(exc)
+        return self._request_info(
+            icao, "ATIS", self.connection_manager.send_atis_request
+        )
 
     def send_direct_request(
         self, fix: str, reason: Optional[str] = None
@@ -372,16 +388,9 @@ class CpdlcSession:
         Returns:
             tuple: (success, metar_text_or_error)
         """
-        if not self.connection_manager.is_connected():
-            self.logger.warning("METAR request attempted without active connection")
-            return False, None
-
-        try:
-            metar_text = self.connection_manager.send_metar_request(icao)
-            return True, metar_text
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request METAR for {icao}: {exc}")
-            return False, str(exc)
+        return self._request_info(
+            icao, "METAR", self.connection_manager.send_metar_request
+        )
 
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.

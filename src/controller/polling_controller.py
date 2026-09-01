@@ -39,6 +39,8 @@ class PollingController:
         self.inactivity_timeout = inactivity_timeout
         self.last_activity_time = 0
         self.poll_timer = None
+        self.parent_window = None
+        self._reported_failure = False
 
     def start(self, parent_window):
         """Start the polling timer.
@@ -46,6 +48,7 @@ class PollingController:
         Args:
             parent_window: The parent window for the timer
         """
+        self.parent_window = parent_window
         self.poll_timer = wx.Timer(parent_window)
         parent_window.Bind(wx.EVT_TIMER, self.on_poll_timer, self.poll_timer)
         self.poll_timer.Start(self.default_poll_interval)
@@ -80,6 +83,10 @@ class PollingController:
             self.logger.error(f"Unexpected error during poll: {e}")
             return
 
+        # Surface link state: a failing poll is otherwise invisible, leaving the
+        # status bar reading "Connected" through a total outage.
+        self._report_connection_state()
+
         # Process received messages
         if messages:
             self.logger.info(f"Received {len(messages)} new message(s)")
@@ -103,11 +110,36 @@ class PollingController:
             success = self.connection_manager.attempt_reconnection()
             if success:
                 self.logger.info("Reconnection successful")
+                self._set_status("Reconnected.")
                 # Restart the poll timer if it's not running
                 if not self.is_running():
                     self.poll_timer.Start(self.default_poll_interval)
             else:
                 self.logger.error("Reconnection failed")
+                self._set_status("Connection lost. Reconnect to continue.")
+                # attempt_reconnection() cleared cnx, so the next tick would
+                # stop the timer and nothing would ever restart it. Stop here
+                # and let the user reconnect deliberately.
+                self.stop()
+
+    def _set_status(self, text):
+        """Show a short connection message in the parent window's status bar."""
+        if self.parent_window and hasattr(self.parent_window, "SetStatusText"):
+            self.parent_window.SetStatusText(text)
+
+    def _report_connection_state(self):
+        """Tell the user when polling starts failing, and when it recovers."""
+        failing = self.connection_manager.poll_failed()
+        if failing:
+            self._reported_failure = True
+            self._set_status(
+                f"Connection problem "
+                f"({self.connection_manager.failure_count()}/"
+                f"{self.connection_manager.max_connection_failures}) - retrying..."
+            )
+        elif self._reported_failure:
+            self._reported_failure = False
+            self._set_status("Connection restored.")
 
     def set_active_polling(self):
         """Switch to more frequent polling during active communication."""

@@ -14,12 +14,9 @@ from hoppie_connector import (
 )
 
 from src.config import (
-    SAYINTENTIONS_API_URL,
-    HOPPIE_API_URL,
     DEFAULT_POLL_INTERVAL,
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
-    MAX_CONNECTION_FAILURES,
     MESSAGE_SOUND_FILENAME,
     load_config,
     save_config,
