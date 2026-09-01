@@ -10,7 +10,38 @@ from src.config import SAYINTENTIONS_API_URL, HOPPIE_API_URL
 
 
 class ConnectionManager:
-    """Manages network connections to the CPDLC service."""
+    """Manages network connections to the CPDLC service.
+
+    Every call into hoppie_connector goes through _call(), which converts
+    transport failures into HoppieError. hoppie_connector raises the builtin
+    ConnectionError for any non-OK HTTP status, and requests raises its own
+    OSError subclasses for timeouts and DNS failures. Neither is a
+    HoppieError, so without this they escape the `except HoppieError` in every
+    caller and disappear into the wx event loop, leaving a request silently
+    doing nothing at all.
+    """
+
+    @staticmethod
+    def _call(operation):
+        """Run a hoppie_connector call, normalising transport failures.
+
+        Args:
+            operation: A zero-argument callable performing the request
+
+        Returns:
+            Whatever the operation returns
+
+        Raises:
+            HoppieError: For both protocol and transport failures
+        """
+        try:
+            return operation()
+        except HoppieError:
+            raise
+        except OSError as exc:
+            # Covers the builtin ConnectionError that hoppie_connector raises
+            # for a bad HTTP status, and requests' own error hierarchy.
+            raise HoppieError(str(exc)) from exc
 
     def __init__(self, logger, message_callback=None):
         """Initialize the connection manager.
@@ -54,10 +85,8 @@ class ConnectionManager:
             api_url = SAYINTENTIONS_API_URL
 
         try:
-            self.cnx = HoppieConnector(
-                callsign,
-                logon_code,
-                url=api_url,
+            self.cnx = self._call(
+                lambda: HoppieConnector(callsign, logon_code, url=api_url)
             )
         except HoppieError:
             self.cnx = None
@@ -91,7 +120,7 @@ class ConnectionManager:
 
         try:
             self.logger.debug("Polling for new messages")
-            messages, poll_status = self.cnx.poll()
+            messages, poll_status = self._call(self.cnx.poll)
 
             # Reset connection failures counter on successful poll
             if self.connection_failures > 0:
@@ -170,7 +199,11 @@ class ConnectionManager:
         if not self.cnx:
             raise HoppieError("Not connected")
 
-        self.cnx.send_cpdlc(recipient, min_value, response_type, message, mrn=mrn)
+        self._call(
+            lambda: self.cnx.send_cpdlc(
+                recipient, min_value, response_type, message, mrn=mrn
+            )
+        )
 
     def send_telex(self, recipient, message):
         """Send a TELEX message.
@@ -185,7 +218,7 @@ class ConnectionManager:
         if not self.cnx:
             raise HoppieError("Not connected")
 
-        self.cnx.send_telex(recipient, message)
+        self._call(lambda: self.cnx.send_telex(recipient, message))
 
     def send_metar_request(self, icao):
         """Send a METAR information request via the Hoppie API.
