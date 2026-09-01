@@ -409,19 +409,34 @@ class CpdlcSession:
 
         return True, message
 
-    def handle_logon_accepted(self, station: str, mrn: Optional[int] = None) -> None:
+    def handle_logon_accepted(self, station: str, mrn: Optional[int] = None) -> bool:
         """Handle a LOGON ACCEPTED message from a station.
 
         Args:
             station: The station that accepted the logon
             mrn: The message reference number from the LOGON ACCEPTED message
+
+        Returns:
+            bool: True if the logon was accepted, False if it was ignored
         """
         # Validate station name is exactly 4 characters
         if len(station) != 4:
             self.logger.warning(
                 f"Invalid station name in LOGON ACCEPTED: {station} (must be 4 characters)"
             )
-            return
+            return False
+
+        # Validate the sender against our pending logon request. The MRN alone
+        # cannot do this: logon() restarts cpdlc_min_counter at 1, so every
+        # pending logon carries MIN 1 and a stale acceptance from a previously
+        # contacted station would match. Only checked when a logon is pending,
+        # so unsolicited acceptances during an automatic handover still apply.
+        if self.pending_logon_station and station != self.pending_logon_station:
+            self.logger.warning(
+                f"LOGON ACCEPTED from {station} does not match pending logon station "
+                f"{self.pending_logon_station}, ignoring"
+            )
+            return False
 
         # Validate MRN matches our pending logon request
         if self.pending_logon_min is not None and mrn is not None:
@@ -429,12 +444,13 @@ class CpdlcSession:
                 self.logger.warning(
                     f"LOGON ACCEPTED MRN {mrn} does not match pending logon MIN {self.pending_logon_min}, ignoring"
                 )
-                return
+                return False
 
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
         self.pending_logon_min = None
         self.pending_logon_station = None
+        return True
 
     def handle_station_logoff(self, station: str) -> None:
         """Handle a LOGOFF message from a station.
