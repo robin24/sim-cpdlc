@@ -6,6 +6,7 @@ import wx
 
 from hoppie_connector import HoppieMessage, CpdlcMessage, TelexMessage
 from src.model.connection_manager import ConnectionManager
+from src.model.message_manager import CPDLC_RESPONSES
 from src.utils.message_formatting import extract_message_content
 
 
@@ -169,20 +170,12 @@ class PollingController:
         if isinstance(message, CpdlcMessage):
             content = message.get_packet_content()
             if content:
-                # Check for common acknowledgement messages
-                ack_responses = [
-                    "WILCO",
-                    "UNABLE",
-                    "ROGER",
-                    "AFFIRM",
-                    "NEGATIVE",
-                    "YES",
-                    "NO",
-                ]
                 clean_content = extract_message_content(content)
 
-                # If the message only contains an acknowledgement, don't increase polling
-                if clean_content in ack_responses:
+                # If the message only contains an acknowledgement, don't
+                # increase polling. CPDLC_RESPONSES is shared with
+                # MessageManager so the two lists cannot drift apart.
+                if clean_content in CPDLC_RESPONSES:
                     return False
 
         # For all other message types, increase polling rate
