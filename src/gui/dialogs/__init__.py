@@ -14,9 +14,6 @@ from src.gui.dialogs.weather_subscriptions_dialog import WeatherSubscriptionsDia
 from src.gui.dialogs.direct_request_dialog import DirectRequestDialog
 from src.gui.dialogs.speed_request_dialog import SpeedRequestDialog
 from src.gui.dialogs.when_can_we_dialog import WhenCanWeDialog
-from src.gui.dialogs.heading_request_dialog import HeadingRequestDialog
-from src.gui.dialogs.confirm_request_dialog import ConfirmRequestDialog
-from src.gui.dialogs.emergency_dialog import EmergencyDialog
 
 __all__ = [
     "ConnectDialog",
@@ -31,7 +28,4 @@ __all__ = [
     "DirectRequestDialog",
     "SpeedRequestDialog",
     "WhenCanWeDialog",
-    "HeadingRequestDialog",
-    "ConfirmRequestDialog",
-    "EmergencyDialog",
 ]
