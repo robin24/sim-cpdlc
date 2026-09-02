@@ -85,10 +85,10 @@ class ConnectionManager:
     they would escape the `except HoppieError` in every caller and disappear
     into the wx event loop, leaving a request silently doing nothing at all.
 
-    Transport failures are also counted -- polls into connection_failures and
-    sends into send_failures -- so a link that is dead for sends but alive for
-    polls still reaches the reconnection logic instead of being reset by the
-    next successful poll.
+    Transport failures are also counted -- polls into connection_failures,
+    sends into send_failures, and information requests into info_failures.
+    Only the first two reach failure_count(): weather runs on a worker thread
+    and a failing ATIS is no evidence the CPDLC link is down.
     """
 
     def __init__(self, logger, message_callback=None):
@@ -108,16 +108,22 @@ class ConnectionManager:
         # clear them, or a link that passes GETs but blocks POSTs would never
         # accumulate enough failures to trigger a reconnection.
         self.send_failures = 0
+        # Information requests run on the weather monitor's worker thread and
+        # are auxiliary to the CPDLC link, so their failures are counted apart
+        # from the ones that decide a reconnection is due.
+        self.info_failures = 0
         self.max_connection_failures = MAX_CONNECTION_FAILURES
         self.message_callback = message_callback
 
-    def _call(self, operation, is_send=False):
+    def _call(self, operation, is_send=False, is_info=False):
         """Run a hoppie_connector call, normalising its failure modes.
 
         Args:
             operation: A zero-argument callable performing the request
             is_send: True for outbound message sends, which count towards
                 send_failures rather than connection_failures
+            is_info: True for information requests, which count towards
+                info_failures and never towards a reconnection
 
         Returns:
             Whatever the operation returns
@@ -128,7 +134,7 @@ class ConnectionManager:
         try:
             result = operation()
         except TRANSPORT_ERRORS as exc:
-            raise self._transport_failure(exc, is_send) from exc
+            raise self._transport_failure(exc, is_send, is_info) from exc
         except PROTOCOL_ERRORS as exc:
             # Not a link problem: a too-long telex or a bad callsign fails here
             # and must not push the client towards a reconnection.
@@ -138,14 +144,17 @@ class ConnectionManager:
 
         if is_send:
             self.send_failures = 0
+        elif is_info:
+            self.info_failures = 0
         return result
 
-    def _transport_failure(self, exc, is_send=False):
+    def _transport_failure(self, exc, is_send=False, is_info=False):
         """Count a transport failure and build the HoppieError for it.
 
         Args:
             exc: The original transport exception
             is_send: True if the failure was on an outbound send
+            is_info: True if the failure was on an information request
 
         Returns:
             HoppieError: The error to raise, tagged as a transport failure
@@ -154,6 +163,10 @@ class ConnectionManager:
             self.send_failures += 1
             count = self.send_failures
             kind = "Send failure"
+        elif is_info:
+            self.info_failures += 1
+            count = self.info_failures
+            kind = "Information request failure"
         else:
             self.connection_failures += 1
             count = self.connection_failures
@@ -403,7 +416,7 @@ class ConnectionManager:
             return response
 
         try:
-            response = self._call(_fetch)
+            response = self._call(_fetch, is_info=True)
         except HoppieError as exc:
             self.logger.error(f"{label} request failed: {exc}")
             raise HoppieError(f"{label} request failed: {exc}") from exc
