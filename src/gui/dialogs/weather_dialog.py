@@ -36,6 +36,10 @@ class WeatherDialog(wx.Dialog):
                 as well as on.
         """
         self.is_watched = is_watched
+        # Set once the user operates the tick box themselves. Until then the
+        # box mirrors the live subscription state as the airport and type
+        # change; afterwards it is theirs and must not be written over.
+        self._user_set_auto_update = False
         wx.Dialog.__init__(
             self, parent, wx.ID_ANY, "Weather Information Request", size=(-1, -1)
         )
@@ -83,6 +87,7 @@ class WeatherDialog(wx.Dialog):
 
         self.icao_text.Bind(wx.EVT_TEXT, self.on_text_change)
         self.type_choice.Bind(wx.EVT_CHOICE, self.on_text_change)
+        self.auto_update_checkbox.Bind(wx.EVT_CHECKBOX, self.on_auto_update_toggled)
 
         self._sync_auto_update_checkbox()
 
@@ -98,9 +103,13 @@ class WeatherDialog(wx.Dialog):
 
         self._sync_auto_update_checkbox()
 
+    def on_auto_update_toggled(self, _):
+        """Take the tick box out of automatic sync once the user sets it."""
+        self._user_set_auto_update = True
+
     def _sync_auto_update_checkbox(self):
         """Point the tick box at whatever airport and report type are showing."""
-        if not self.is_watched:
+        if not self.is_watched or self._user_set_auto_update:
             return
 
         icao, info_type, _ = self.get_weather_details()

@@ -43,3 +43,33 @@ def test_a_weather_request_reports_the_code_in_upper_case(dialog):
     weather.icao_text.SetValue("egll")
 
     assert weather.get_weather_details() == ("EGLL", "metar", False)
+
+
+def test_ticking_survives_a_correction_to_the_icao(dialog):
+    """The tick was silently reverted by the next keystroke, so a typo fixed
+    after ticking meant no subscription and nothing said about it."""
+    weather = dialog(WeatherDialog, "metar", is_watched=lambda icao, kind: False)
+
+    weather.icao_text.SetValue("EGKK")
+    weather.auto_update_checkbox.SetValue(True)
+    weather.on_auto_update_toggled(None)
+    weather.icao_text.SetValue("EGLL")
+
+    assert weather.get_weather_details() == ("EGLL", "metar", True)
+
+
+def test_unticking_survives_a_correction_to_the_icao(dialog):
+    """Unticking is how updates are stopped, so it has to stick too."""
+    watched = {("EGLL", "metar")}
+    weather = dialog(
+        WeatherDialog, "metar", is_watched=lambda icao, kind: (icao, kind) in watched
+    )
+
+    weather.icao_text.SetValue("EGLL")
+    assert weather.auto_update_checkbox.GetValue() is True
+
+    weather.auto_update_checkbox.SetValue(False)
+    weather.on_auto_update_toggled(None)
+    weather.icao_text.SetValue("EGLL")
+
+    assert weather.get_weather_details() == ("EGLL", "metar", False)
