@@ -108,3 +108,36 @@ def test_a_report_with_no_separators_is_left_alone():
 def test_formatting_survives_an_empty_report():
     assert format_report_text("") == ""
     assert format_report_line(None) == ""
+
+
+# --- an ATIS whose letter cannot be read ---------------------------------------
+
+FRANKFURT_1150 = "FRANKFURT ARRIVAL 1150Z RWY 25L ADVISE YOU HAVE ROMEO"
+FRANKFURT_1250 = "FRANKFURT ARRIVAL 1250Z RWY 25L ADVISE YOU HAVE ROMEO"
+
+
+def test_an_atis_with_no_readable_letter_ignores_the_observation_time():
+    """Falling back to the full text meant the Zulu time made every re-fetch
+    look like a new broadcast, so the pilot was interrupted every cycle for a
+    report that had not changed."""
+    first = report_signature(FRANKFURT_1150, "vatatis", "EDDF")
+    second = report_signature(FRANKFURT_1250, "vatatis", "EDDF")
+
+    assert first == second
+
+
+def test_an_atis_with_no_letter_still_notices_a_real_change():
+    changed = "FRANKFURT ARRIVAL 1250Z RWY 07R ADVISE YOU HAVE SIERRA"
+
+    assert report_signature(FRANKFURT_1150, "vatatis", "EDDF") != (
+        report_signature(changed, "vatatis", "EDDF")
+    )
+
+
+def test_a_metar_still_counts_a_new_observation_time_as_new():
+    """A METAR is identified by its observation time: the same conditions an
+    hour later is a new report, not a repeat."""
+    first = report_signature("EGLL 261150Z 24010KT Q1013", "metar")
+    second = report_signature("EGLL 261250Z 24010KT Q1013", "metar")
+
+    assert first != second
