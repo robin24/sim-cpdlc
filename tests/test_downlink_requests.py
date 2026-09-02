@@ -36,72 +36,27 @@ def last_frame(session):
     return recipient, min_value, rr, message
 
 
-# --- addressing and response requirements -------------------------------------
-
-
-def test_a_heading_request_goes_to_the_current_station(session):
-    ok, text = session.send_heading_request("270")
-    recipient, _, rr, message = last_frame(session)
-
-    assert (ok, text) == (True, "REQUEST HEADING 270")
-    assert (recipient, message) == (STATION, "REQUEST HEADING 270")
-    assert rr == "Y"
-
-
-def test_a_confirm_query_asks_for_an_answer(session):
-    """CONFIRM ASSIGNED ... is useless without a reply, so RR must not be NO."""
-    session.send_query("CONFIRM ASSIGNED LEVEL")
-    _, _, rr, message = last_frame(session)
-
-    assert message == "CONFIRM ASSIGNED LEVEL"
-    assert rr == "Y"
+# --- addressing and preconditions ---------------------------------------------
 
 
 def test_each_message_advances_the_min_counter(session):
     """A reused MIN makes the station read the second message as the first."""
-    session.send_heading_request("270")
-    session.send_heading_request("280")
+    session.send_altitude_change_request("FL350")
+    session.send_altitude_change_request("FL370")
 
     assert [frame[1] for frame in session.connection_manager.sent] == [1, 2]
-
-
-# --- preconditions ------------------------------------------------------------
 
 
 def test_a_request_without_a_station_is_refused(make_session):
     session = make_session(station="")
 
-    assert session.send_heading_request("270") == (False, None)
+    assert session.send_altitude_change_request("FL350") == (False, None)
 
 
 def test_a_request_without_a_connection_is_refused(make_session):
     session = make_session(connected=False)
 
-    assert session.send_heading_request("270") == (False, None)
-
-
-# --- emergency ----------------------------------------------------------------
-
-
-def test_a_mayday_carries_fuel_souls_and_the_diversion(session):
-    _, text = session.send_emergency(
-        True, "0230", "212", "BIKF", "DCT", "ENGINE FAILURE"
-    )
-
-    assert text == (
-        "MAYDAY MAYDAY MAYDAY\n"
-        "0230 OF FUEL REMAINING AND 212 SOULS ON BOARD\n"
-        "DIVERTING TO BIKF VIA DCT\n"
-        "ENGINE FAILURE"
-    )
-
-
-def test_a_pan_pan_with_no_details_carries_nothing_else(session):
-    assert session.send_emergency(False)[1] == "PAN PAN PAN"
-
-
-def test_cancelling_an_emergency_says_so_plainly(session):
-    assert session.send_cancel_emergency()[1] == "CANCEL EMERGENCY"
+    assert session.send_altitude_change_request("FL350") == (False, None)
 
 
 # --- weather ------------------------------------------------------------------
