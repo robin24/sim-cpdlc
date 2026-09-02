@@ -228,25 +228,35 @@ class WeatherMonitor:
     # ------------------------------------------------------------------
 
     def check_now(self):
-        """Run an update cycle immediately, outside the normal timer tick."""
-        self._run_cycle()
+        """Run an update cycle immediately, outside the normal timer tick.
+
+        Returns:
+            bool: True if a cycle started. False when there is nothing to
+                check, a cycle is already running, or the monitor is stopped
+                or disconnected -- the caller should not claim otherwise.
+        """
+        return self._run_cycle()
 
     def _on_timer(self, _):
         """Handle the periodic update timer."""
         self._run_cycle()
 
     def _run_cycle(self):
-        """Kick off a fetch for every subscription, on a worker thread."""
+        """Kick off a fetch for every subscription, on a worker thread.
+
+        Returns:
+            bool: True if a cycle started, False if it was skipped.
+        """
         if self._shutting_down or not self._subscriptions or self._parent is None:
-            return
+            return False
 
         if self._cycle_running:
             self.logger.debug("Weather update cycle still running, skipping this tick")
-            return
+            return False
 
         if not self.connection_manager.is_connected():
             self.logger.debug("Not connected, skipping weather update cycle")
-            return
+            return False
 
         # Snapshot on the GUI thread so the worker never touches the live dict.
         pending = [(s.icao, s.info_type) for s in self._subscriptions.values()]
@@ -256,6 +266,7 @@ class WeatherMonitor:
             target=self._fetch_worker, args=(pending,), daemon=True
         )
         thread.start()
+        return True
 
     def _fetch_worker(self, pending):
         """Fetch each subscribed report. Runs on a worker thread.

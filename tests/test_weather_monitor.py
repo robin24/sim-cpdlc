@@ -177,3 +177,34 @@ def test_the_monitor_can_be_stopped_and_started_again(logger, frame):
 
     monitor.shutdown()
     assert monitor._timer is None
+
+
+# --- reporting whether a cycle actually started -------------------------------
+
+
+def test_check_now_says_a_cycle_started(logger, frame):
+    """The dialog tells the user reports are being checked, so it needs to know
+    whether that is true."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
+    monitor.start(frame)
+    monitor.subscribe("EGLL", "metar")
+
+    assert monitor.check_now() is True
+
+
+def test_check_now_says_nothing_started_while_stopped(logger, frame):
+    """Disconnecting stops the monitor but leaves the dialog reachable. Saying
+    a check is under way when none is would be worse than saying nothing."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
+    monitor.start(frame)
+    monitor.subscribe("EGLL", "metar")
+    monitor.stop()
+
+    assert monitor.check_now() is False
+
+
+def test_check_now_says_nothing_started_with_no_subscriptions(logger, frame):
+    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
+    monitor.start(frame)
+
+    assert monitor.check_now() is False
