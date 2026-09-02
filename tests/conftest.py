@@ -27,6 +27,11 @@ def wx_app():
     """
     app = wx.App()
     yield app
+    # Destroy() only queues a window for deletion; without a yield the whole
+    # object graph behind it -- and for a MainWindow that means a weather
+    # monitor, a SimConnect manager and an update checker -- stays alive for
+    # the rest of the session.
+    wx.SafeYield()
     app.Destroy()
 
 

@@ -27,13 +27,11 @@ class HeadlessMainWindow(MainWindow):
 
 
 @pytest.fixture
-def window(logger):
-    app = wx.App()
+def window(logger, wx_app):
     session = CpdlcSession(logger, FakeConnectionManager())
     frame = HeadlessMainWindow(logger, session, MessageManager(logger))
     yield frame
     frame.Destroy()
-    app.Destroy()
 
 
 def test_init_ui_wires_the_message_view_to_the_live_session(window):
