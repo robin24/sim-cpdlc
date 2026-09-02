@@ -1,5 +1,7 @@
 """Tests for polling-rate decisions."""
 
+import pytest
+
 from conftest import FakeConnectionManager, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
@@ -76,3 +78,41 @@ def test_a_stopped_poller_does_not_reschedule_itself(logger, frame):
     poller._schedule_next()
 
     assert poller.is_running() is False
+
+
+class RaisingConnection:
+    """Polls successfully but hands back a message the callback will choke on."""
+
+    def __init__(self):
+        self.polls = 0
+
+    def is_connected(self):
+        return True
+
+    def poll(self):
+        self.polls += 1
+        return ["UPLINK"], None
+
+    def poll_failed(self):
+        return False
+
+    def should_attempt_reconnection(self):
+        return False
+
+
+def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
+    """The timer is one-shot, so a tick that dies without rescheduling ends
+    polling for the session while the status bar still reads Connected."""
+    connection = RaisingConnection()
+
+    def explode(_message):
+        raise RuntimeError("SimConnect went away")
+
+    poller = PollingController(logger, connection, explode)
+    poller.start(frame)
+    poller.poll_timer.Stop()
+
+    with pytest.raises(RuntimeError):
+        poller.on_poll_timer(None)
+
+    assert poller.is_running() is True

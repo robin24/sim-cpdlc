@@ -132,52 +132,55 @@ class PollingController:
             self.stop()
             return
 
+        # The timer is one-shot, so the next tick only happens if this handler
+        # arranges it. Message handling reaches into the GUI, SimConnect and a
+        # nested logon, so anything raising there would otherwise end polling
+        # for the rest of the session. stop() sets _stopped, so the
+        # reconnection-failure branch below still ends polling deliberately.
         try:
-            messages, poll_status = self.connection_manager.poll()
-        except Exception as e:
-            self.logger.error(f"Unexpected error during poll: {e}")
-            # Keep polling: a single failed attempt should not end the session.
+            try:
+                messages, poll_status = self.connection_manager.poll()
+            except Exception as e:
+                self.logger.error(f"Unexpected error during poll: {e}")
+                return
+
+            # Surface link state: a failing poll is otherwise invisible, leaving
+            # the status bar reading "Connected" through a total outage.
+            self._report_connection_state()
+
+            # Process received messages
+            if messages:
+                self.logger.info(f"Received {len(messages)} new message(s)")
+                for message in messages:
+                    self.logger.info(f"Received message: {message}")
+                    if self.message_callback:
+                        self.message_callback(message)
+
+                    # Check if this message should trigger faster polling
+                    if self.should_increase_polling_rate(message):
+                        self.set_active_polling()
+
+            # Check if we should return to default polling after inactivity
+            self.check_polling_timeout()
+
+            # Check if we need to attempt reconnection
+            if self.connection_manager.should_attempt_reconnection():
+                self.logger.warning(
+                    "Maximum connection failures reached, attempting reconnection"
+                )
+                success = self.connection_manager.attempt_reconnection()
+                if success:
+                    self.logger.info("Reconnection successful")
+                    self._set_status("Reconnected.")
+                else:
+                    self.logger.error("Reconnection failed")
+                    self._set_status("Connection lost. Reconnect to continue.")
+                    # attempt_reconnection() cleared cnx, so the next tick would
+                    # stop the timer and nothing would ever restart it. Stop here
+                    # and let the user reconnect deliberately.
+                    self.stop()
+        finally:
             self._schedule_next()
-            return
-
-        # Surface link state: a failing poll is otherwise invisible, leaving the
-        # status bar reading "Connected" through a total outage.
-        self._report_connection_state()
-
-        # Process received messages
-        if messages:
-            self.logger.info(f"Received {len(messages)} new message(s)")
-            for message in messages:
-                self.logger.info(f"Received message: {message}")
-                if self.message_callback:
-                    self.message_callback(message)
-
-                # Check if this message should trigger faster polling
-                if self.should_increase_polling_rate(message):
-                    self.set_active_polling()
-
-        # Check if we should return to default polling after inactivity
-        self.check_polling_timeout()
-
-        # Check if we need to attempt reconnection
-        if self.connection_manager.should_attempt_reconnection():
-            self.logger.warning(
-                "Maximum connection failures reached, attempting reconnection"
-            )
-            success = self.connection_manager.attempt_reconnection()
-            if success:
-                self.logger.info("Reconnection successful")
-                self._set_status("Reconnected.")
-            else:
-                self.logger.error("Reconnection failed")
-                self._set_status("Connection lost. Reconnect to continue.")
-                # attempt_reconnection() cleared cnx, so the next tick would
-                # stop the timer and nothing would ever restart it. Stop here
-                # and let the user reconnect deliberately.
-                self.stop()
-
-        # stop() sets _stopped, so the failure branch above still ends polling.
-        self._schedule_next()
 
     def _set_status(self, text):
         """Show a short connection message in the parent window's status bar."""
