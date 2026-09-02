@@ -12,6 +12,7 @@ stripped-down frame; this builds the whole window.
 import pytest
 
 import src.gui.main_window as mw
+from src.config import DEFAULT_CONFIG
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 
@@ -46,14 +47,22 @@ MENU_HANDLERS = [
 def window(logger, wx_app, monkeypatch):
     """The real window, kept offline and non-modal.
 
-    The update check would reach the network, and the guards under test open a
-    message box that would block on a nested modal loop.
+    Three things in __init__ would otherwise stop a test run dead:
+
+    - _check_first_launch() opens a welcome dialog and blocks on ShowModal
+      whenever no config file exists, which is the case on any CI runner and
+      any fresh machine. It also writes a config file into the real user data
+      directory, which a test has no business doing.
+    - the update check reaches the network.
+    - a missing sound file, and the guards under test, open a message box.
+
+    The config is stubbed to the defaults rather than read from disk, so the
+    window under test does not vary with whatever the developer happens to
+    have configured.
     """
-    real_load_config = mw.load_config
+    monkeypatch.setattr(mw.MainWindow, "_check_first_launch", lambda self: None)
     monkeypatch.setattr(
-        mw,
-        "load_config",
-        lambda: {**real_load_config(), "auto_check_updates": False},
+        mw, "load_config", lambda: {**DEFAULT_CONFIG, "auto_check_updates": False}
     )
     monkeypatch.setattr(mw.wx, "MessageBox", lambda *args, **kwargs: None)
 
