@@ -75,7 +75,7 @@ Six defects in the surviving code, from the review of PR #24.
 | 2 | `set_active_polling()` re-arms the one-shot timer on every call, so activity faster than the 20 s active interval starves polling entirely, and a single send can push a nearly-due poll out to a fresh 20 s. | Track the pending poll's deadline and re-arm only when it is further off than the active interval. |
 | 3 | `extract_atis_letter` returns the first single letter after any marker, and the ICAO is a marker, so a D-ATIS designator (`KSFO D ATIS INFO Q`) is read as the information letter and real changes never announce. | Drop the ICAO from the marker set, leaving `INFORMATION`/`INFO`/`ATIS`. |
 | 4 | `WeatherReport` is the only message type that bypasses the `@`-separator formatters, so an ATIS reaches the list and the detail pane with literal `@` characters, which NVDA reads as "at". | Add weather-specific formatters to `weather_parsing.py` and use them in `MessageManager`. |
-| 5 | `WeatherDialog._sync_auto_update_checkbox` force-writes the tick box on every keystroke and report-type change, silently discarding the user's choice in both directions. | Latch that the user has touched the box and stop re-syncing once they have. |
+| 5 | `WeatherDialog._sync_auto_update_checkbox` force-writes the checkbox on every keystroke and report-type change, silently discarding the user's choice in both directions. | Latch that the user has touched the box and stop re-syncing once they have. |
 | 6 | Weather fetches run through `_call` with `is_send=False`, so a failing inforeq increments `connection_failures` — the counter that decides the CPDLC link is dead — from a worker thread. | Give `_call` a counter selector and route inforeq failures into their own `info_failures`, outside `failure_count()`. |
 
 **Fix 2 needs a deadline, not a flag.** `wx.Timer` cannot report how much of a
@@ -161,8 +161,8 @@ New tests, one per fix, each failing before its change:
 3. `extract_atis_letter("KSFO D ATIS INFO Q", "KSFO")` returns `Q`, so a D-ATIS
    whose letter advances to `R` announces the change.
 4. A report containing `@` and `@@` renders with line breaks and no `@`.
-5. Ticking the box and then editing the ICAO preserves the tick; unticking it
-   and then editing preserves the untick.
+5. Checking the box and then editing the ICAO preserves the check; unchecking it
+   and then editing preserves the uncheck.
 6. A failed inforeq does not change `failure_count()` or
    `should_attempt_reconnection()`.
 

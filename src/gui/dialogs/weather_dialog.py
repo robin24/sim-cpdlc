@@ -11,8 +11,8 @@ from src.utils.weather_parsing import REPORT_TYPES
 REPORT_ORDER = ("vatatis", "metar", "taf", "shorttaf")
 
 AUTO_UPDATE_HELP = (
-    "When ticked, the report is requested again periodically and you are\n"
-    "notified only when it actually changes. Untick it to stop updates, or\n"
+    "When checked, the report is requested again periodically and you are\n"
+    "notified only when it actually changes. Uncheck it to stop updates, or\n"
     "use the context menu on any weather report in the message list."
 )
 
@@ -32,13 +32,13 @@ class WeatherDialog(wx.Dialog):
             default_type: Report type key to preselect
             is_watched: Callable(icao, info_type) returning whether that report
                 is already being kept up to date. Until the user operates the
-                tick box themselves, it mirrors this: the box always shows the
+                checkbox themselves, it mirrors this: the box always shows the
                 real state and can be used to turn updates off as well as on.
                 From that point on it is theirs, and stops following
                 is_watched.
         """
         self.is_watched = is_watched
-        # Set once the user operates the tick box themselves. Until then the
+        # Set once the user operates the checkbox themselves. Until then the
         # box mirrors the live subscription state as the airport and type
         # change; afterwards it is theirs and must not be written over.
         self._user_set_auto_update = False
@@ -96,7 +96,7 @@ class WeatherDialog(wx.Dialog):
     def on_text_change(self, _):
         """
         Enable the OK button if ICAO code is exactly 4 characters, and keep the
-        tick box showing whether that report is currently being watched.
+        checkbox showing whether that report is currently being watched.
         """
         if len(self.icao_text.GetValue().strip()) == 4:
             self.ok_button.Enable()
@@ -106,11 +106,11 @@ class WeatherDialog(wx.Dialog):
         self._sync_auto_update_checkbox()
 
     def on_auto_update_toggled(self, _):
-        """Take the tick box out of automatic sync once the user sets it."""
+        """Take the checkbox out of automatic sync once the user sets it."""
         self._user_set_auto_update = True
 
     def _sync_auto_update_checkbox(self):
-        """Point the tick box at whatever airport and report type are showing."""
+        """Point the checkbox at whatever airport and report type are showing."""
         if not self.is_watched or self._user_set_auto_update:
             return
 

@@ -27,8 +27,10 @@ class MessageView:
             on_acknowledge: Callback for message acknowledgement
             get_current_station: Callable returning the station currently
                 logged on, used to scope responses to the live dialogue
-            on_toggle_weather_updates: Callback(icao, info_type) to start or
-                stop automatic updates for a weather report
+            on_toggle_weather_updates: Callback(icao, info_type, text) to
+                start or stop automatic updates for a weather report. The text
+                seeds change detection, so re-enabling updates on a report
+                already shown does not announce it again
             is_weather_watched: Callable(icao, info_type) returning whether a
                 report is currently being kept up to date
         """
@@ -188,7 +190,7 @@ class MessageView:
         self.parent.Bind(
             wx.EVT_MENU,
             lambda event, r=report: self.on_toggle_weather_updates(
-                r.icao, r.info_type
+                r.icao, r.info_type, r.text
             ),
             menu_item,
         )

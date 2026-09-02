@@ -15,6 +15,7 @@ import src.gui.main_window as mw
 from src.config import DEFAULT_CONFIG
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
+from src.model.weather_monitor import WeatherSubscription
 
 MENU_TITLES = ["File", "Requests"]
 
@@ -106,7 +107,7 @@ def test_the_requests_menu_carries_every_request(window):
         "Speed change",
         "When can we expect",
         "Telex message",
-        "Weather request",
+        "ATIS & Weather request",
         "Automatic weather updates",
     ]
 
@@ -255,8 +256,8 @@ def test_the_context_menu_toggle_stops_and_restarts_updates(window):
     assert window._is_weather_watched("EGLL", "metar") is True
 
 
-def test_the_tick_box_mirrors_the_live_subscription_state(window):
-    """Opening the dialog always unticked would misreport what is happening,
+def test_the_checkbox_mirrors_the_live_subscription_state(window):
+    """Opening the dialog always unchecked would misreport what is happening,
     so it has to follow the airport as it is typed."""
     window.weather_monitor.subscribe("EGLL", "metar")
     dialog = WeatherDialog(window, "metar", is_watched=window._is_weather_watched)
@@ -273,3 +274,55 @@ def test_the_tick_box_mirrors_the_live_subscription_state(window):
         assert dialog.get_weather_details()[2] is True
     finally:
         dialog.Destroy()
+
+
+# --- the notification chime ---------------------------------------------------
+
+
+def chimes(window, monkeypatch):
+    """Record every notification sound the window would play."""
+    played = []
+    monkeypatch.setattr(window, "_play_message_sound", lambda: played.append(None))
+    return played
+
+
+def test_a_report_the_pilot_asked_for_arrives_quietly(window, monkeypatch):
+    """The chime means something arrived unprompted. A report the pilot just
+    requested is already on their screen, so announcing it is noise."""
+    played = chimes(window, monkeypatch)
+
+    window._add_weather_message("EGLL 261150Z 24010KT Q1013", "EGLL", "metar")
+
+    assert played == []
+
+
+def test_a_changed_report_announces_itself(window, monkeypatch):
+    """A report that changed while the pilot was busy is the whole point of
+    automatic updates, so that one has to chime."""
+    played = chimes(window, monkeypatch)
+    subscription = WeatherSubscription("EGLL", "metar")
+
+    window._on_weather_update(
+        subscription, "EGLL 261250Z 26015KT Q1012", "METAR EGLL"
+    )
+
+    assert len(played) == 1
+
+
+# --- toggling updates off and on again ----------------------------------------
+
+
+def test_re_enabling_updates_does_not_repeat_the_report_on_screen(window):
+    """Turning updates off and back on for a report the pilot is looking at
+    must not announce it again: nothing changed while it was off."""
+    text = "EGLL 261150Z 24010KT Q1013"
+    window._add_weather_message(text, "EGLL", "metar")
+    window.weather_monitor.subscribe("EGLL", "metar", initial_text=text)
+
+    window._on_toggle_weather_updates("EGLL", "metar", text)
+    window._on_toggle_weather_updates("EGLL", "metar", text)
+
+    before = window.message_view.message_list.GetItemCount()
+    window.weather_monitor._on_result("EGLL", "metar", text, None)
+
+    assert window.message_view.message_list.GetItemCount() == before

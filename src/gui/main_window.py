@@ -205,7 +205,7 @@ class MainWindow(wx.Frame):
         )
         menu_item_weather = requests_menu.Append(
             wx.ID_ANY,
-            "Weather &request\tCTRL+I",
+            "AT&IS && Weather request\tCTRL+I",
             "Request a METAR, TAF or ATIS for an airport.",
         )
         menu_item_weather_subs = requests_menu.Append(
@@ -737,7 +737,7 @@ class MainWindow(wx.Frame):
             label = report_type_label(info_type)
             was_watched = self.weather_monitor.is_subscribed(icao, info_type)
 
-            # Unticking the box is how the user stops updates, so act on it
+            # Unchecking the box is how the user stops updates, so act on it
             # whether or not this request succeeds.
             if was_watched and not auto_update:
                 self.weather_monitor.unsubscribe(icao, info_type)
@@ -771,7 +771,7 @@ class MainWindow(wx.Frame):
         """Show and manage the reports being kept up to date."""
         if self.weather_monitor.count() == 0:
             wx.MessageBox(
-                "No reports are being kept up to date. Tick "
+                "No reports are being kept up to date. Check "
                 "'Keep this report updated automatically' when you request a "
                 "METAR, TAF or ATIS to start watching one.",
                 "Automatic Weather Updates",
@@ -791,7 +791,9 @@ class MainWindow(wx.Frame):
             text: The new report text
             description: A short description of the new report
         """
-        self._add_weather_message(text, subscription.icao, subscription.info_type)
+        self._add_weather_message(
+            text, subscription.icao, subscription.info_type, play_sound=True
+        )
         self.SetStatusText(f"New {description}")
 
     def _on_weather_error(self, subscription, error):
@@ -851,8 +853,8 @@ class MainWindow(wx.Frame):
 
         dlg.Destroy()
 
-    def _add_weather_message(self, text, icao, info_type):
-        """Add a weather report to the message list and play the sound.
+    def _add_weather_message(self, text, icao, info_type, play_sound=False):
+        """Add a weather report to the message list.
 
         Tagging the report with its airport and type lets the context menu on
         it start or stop automatic updates without retyping anything.
@@ -861,10 +863,15 @@ class MainWindow(wx.Frame):
             text: The report text
             icao: Airport ICAO code
             info_type: Report type key
+            play_sound: Whether to play the notification sound. Off for a
+                report the pilot just asked for, which is already on their
+                screen; on for an automatic update, which arrives unprompted.
         """
         message_id = self.message_manager.add_weather_message(text, icao, info_type)
         self.message_view.add_message(message_id)
-        self._play_message_sound()
+
+        if play_sound:
+            self._play_message_sound()
 
     def _is_weather_watched(self, icao, info_type):
         """Check whether a report is being kept up to date.
@@ -878,12 +885,15 @@ class MainWindow(wx.Frame):
         """
         return self.weather_monitor.is_subscribed(icao, info_type)
 
-    def _on_toggle_weather_updates(self, icao, info_type):
+    def _on_toggle_weather_updates(self, icao, info_type, text=None):
         """Start or stop automatic updates for a report.
 
         Args:
             icao: Airport ICAO code
             info_type: Report type key
+            text: The report already on screen, if any. Seeding the new
+                subscription with it stops the next check announcing a report
+                the pilot is looking at as though it were new.
         """
         label = report_type_label(info_type)
 
@@ -895,7 +905,7 @@ class MainWindow(wx.Frame):
             self.SetStatusText(f"Stopped watching {label} {icao}.")
             return
 
-        self.weather_monitor.subscribe(icao, info_type)
+        self.weather_monitor.subscribe(icao, info_type, initial_text=text)
         self._add_custom_message(
             f"Now watching {label} {icao} for changes", "SYSTEM"
         )

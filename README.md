@@ -100,10 +100,10 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 
 ### Requesting Weather
 
-1. Go to `Requests > Weather request`
+1. Go to `Requests > ATIS & Weather request`
 2. Choose the report type: METAR, TAF, short TAF, or ATIS
 3. Enter the airport ICAO code
-4. Optionally tick `Keep this report updated automatically`
+4. Optionally check `Keep this report updated automatically`
 5. Click OK
 
 The report is added to the message list and the notification sound plays, just
@@ -118,16 +118,16 @@ actually changed**: for an ATIS that means a new information letter, and for a
 METAR or TAF a change to the report itself. A re-worded ATIS carrying the same
 letter stays silent.
 
-- Tick `Keep this report updated automatically` in the weather request dialog to
+- Check `Keep this report updated automatically` in the weather request dialog to
   start watching a report
 
 To stop watching one, use whichever is closest to hand:
 
 - Select the report in the message list and press the Applications key (or
   right-click) for `Stop automatic updates`
-- Request the same report again with the tick box cleared. The tick box always
+- Request the same report again with the checkbox cleared. The checkbox always
   shows whether that airport and report type are currently being watched
-  (unless you have already ticked or unticked it yourself in that dialog), so
+  (unless you have already checked or unchecked it yourself in that dialog), so
   it turns updates off as readily as on
 - `Requests > Automatic weather updates` lists everything being watched, and lets
   you check them all immediately, stop one, or stop all

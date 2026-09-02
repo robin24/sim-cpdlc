@@ -26,11 +26,11 @@ def dialog(frame):
 
 
 def _fire_auto_update_toggle(weather):
-    """Tick or untick the auto-update box the way a user actually does.
+    """Check or uncheck the auto-update box the way a user actually does.
 
     Calling on_auto_update_toggled() directly would keep passing even if
     the Bind() that wires it to the checkbox were deleted, silently
-    bringing back the reverting-tick bug the handler exists to prevent.
+    bringing back the reverting-checkbox bug the handler exists to prevent.
     """
     checkbox = weather.auto_update_checkbox
     event = wx.CommandEvent(wx.EVT_CHECKBOX.typeId, checkbox.GetId())
@@ -59,9 +59,9 @@ def test_a_weather_request_reports_the_code_in_upper_case(dialog):
     assert weather.get_weather_details() == ("EGLL", "metar", False)
 
 
-def test_ticking_survives_a_correction_to_the_icao(dialog):
-    """The tick was silently reverted by the next keystroke, so a typo fixed
-    after ticking meant no subscription and nothing said about it."""
+def test_checking_survives_a_correction_to_the_icao(dialog):
+    """The check was silently reverted by the next keystroke, so a typo fixed
+    after checking meant no subscription and nothing said about it."""
     weather = dialog(WeatherDialog, "metar", is_watched=lambda icao, kind: False)
 
     weather.icao_text.SetValue("EGKK")
@@ -72,8 +72,8 @@ def test_ticking_survives_a_correction_to_the_icao(dialog):
     assert weather.get_weather_details() == ("EGLL", "metar", True)
 
 
-def test_unticking_survives_a_correction_to_the_icao(dialog):
-    """Unticking is how updates are stopped, so it has to stick too."""
+def test_unchecking_survives_a_correction_to_the_icao(dialog):
+    """Unchecking is how updates are stopped, so it has to stick too."""
     watched = {("EGLL", "metar"), ("EGKK", "metar")}
     weather = dialog(
         WeatherDialog, "metar", is_watched=lambda icao, kind: (icao, kind) in watched
