@@ -1,64 +1,25 @@
-"""Build the real MainWindow offline and inspect its menus and wiring."""
+"""Integration tests that build the real MainWindow.
 
-import os
-import sys
+MainWindow.__init__ wires the menus, the message view and the weather monitor
+together. A handler renamed without its menu entry, or a weather report that
+loses the tag its context menu acts on, shows up here rather than as a dead
+menu item in the shipped application.
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+Distinct from test_main_window_wiring.py, which runs _init_ui alone on a
+stripped-down frame; this builds the whole window.
+"""
 
-import logging
-import sys
-
-logging.disable(logging.CRITICAL)
-
-import wx
+import pytest
 
 import src.gui.main_window as mw
+from src.gui.dialogs import WeatherDialog
+from src.model.message_manager import WeatherReport
 
-# Keep the test offline and non-modal.
-_real_load_config = mw.load_config
+MENU_TITLES = ["File", "Requests", "Weather", "Emergency"]
 
-
-def offline_config():
-    config = dict(_real_load_config())
-    config["auto_check_updates"] = False
-    return config
-
-
-mw.load_config = offline_config
-
-failures = []
-
-
-def check(label, got, want):
-    if got == want:
-        print(f"  PASS  {label}")
-    else:
-        print(f"  FAIL  {label}\n          got:  {got!r}\n          want: {want!r}")
-        failures.append(label)
-
-
-app = wx.App()
-window = mw.MainWindow(None, "Sim-CPDLC test", logging.getLogger("test"))
-window.Hide()
-
-menu_bar = window.GetMenuBar()
-menu_titles = [menu_bar.GetMenuLabel(i) for i in range(menu_bar.GetMenuCount())]
-print("\nMenus:", menu_titles)
-check("menu titles", [t.replace("&", "") for t in menu_titles],
-      ["File", "Requests", "Weather", "Emergency"])
-
-print()
-for index in range(menu_bar.GetMenuCount()):
-    menu = menu_bar.GetMenu(index)
-    print(f"{menu_bar.GetMenuLabel(index)}:")
-    for item in menu.GetMenuItems():
-        if item.IsSeparator():
-            continue
-        print(f"    {item.GetItemLabel()}")
-
-# The above check needs internals wx doesn't expose, so verify the handler
-# methods exist by name instead.
-expected_handlers = [
+# wx does not expose which handler a menu item is bound to, so the menus are
+# checked for shape and the handlers are checked for existence by name.
+MENU_HANDLERS = [
     "on_connect_or_disconnect",
     "on_settings",
     "on_check_updates",
@@ -79,76 +40,151 @@ expected_handlers = [
     "on_declare_emergency",
     "on_cancel_emergency",
 ]
-missing = [name for name in expected_handlers if not callable(getattr(window, name, None))]
-check("all menu handlers exist", missing, [])
 
-check("weather monitor created", hasattr(window, "weather_monitor"), True)
-check("weather monitor idle at startup", window.weather_monitor.count(), 0)
 
-# The guards must refuse cleanly while disconnected, without a dialog.
-mw.wx.MessageBox = lambda *a, **k: None
-check("guard refuses when disconnected", window._require_station("test"), False)
-check("connection guard refuses", window._require_connection("test"), False)
+@pytest.fixture
+def window(logger, wx_app, monkeypatch):
+    """The real window, kept offline and non-modal.
 
-# Adding a message with sound must not raise even if the sound is missing.
-window.new_message_sound = None
-window._add_custom_message("METAR EGLL: TEST", "METAR", play_sound=True)
-check("weather message added to view", window.message_view.message_list.GetItemCount() > 0, True)
+    The update check would reach the network, and the guards under test open a
+    message box that would block on a nested modal loop.
+    """
+    real_load_config = mw.load_config
+    monkeypatch.setattr(
+        mw,
+        "load_config",
+        lambda: {**real_load_config(), "auto_check_updates": False},
+    )
+    monkeypatch.setattr(mw.wx, "MessageBox", lambda *args, **kwargs: None)
 
-# A multi-line message must be flattened in the list but kept in the detail pane.
-window._add_custom_message("OCEANIC REQUEST\nBAW123\nENTRY POINT:MALOT", "BAW123")
-last = window.message_view.message_list.GetItemCount() - 1
-list_text = window.message_view.message_list.GetItemText(last, 1)
-message_id = window.message_view.message_list.GetItemData(last)
-detail = window.message_manager.get_message_detail_text(message_id)
-check("list text is one line", "\n" in list_text, False)
-check("detail text keeps line breaks", "\n" in detail, True)
+    window = mw.MainWindow(None, "Sim-CPDLC test", logger)
+    window.Hide()
+    yield window
+    window.weather_monitor.clear()
+    window.weather_monitor.shutdown()
+    window.Destroy()
 
-# --- Automatic weather updates can be started and stopped ------------------
-from src.model.message_manager import WeatherReport
 
-window.weather_monitor.subscribe("EGLL", "metar")
-check("report is watched after subscribe", window._is_weather_watched("EGLL", "metar"), True)
+def last_row(window):
+    """Index of the most recently added row in the message list."""
+    return window.message_view.message_list.GetItemCount() - 1
 
-# The context menu toggle turns it off again...
-window._on_toggle_weather_updates("EGLL", "metar")
-check("toggle stops updates", window._is_weather_watched("EGLL", "metar"), False)
-# ...and back on.
-window._on_toggle_weather_updates("EGLL", "metar")
-check("toggle starts updates", window._is_weather_watched("EGLL", "metar"), True)
 
-# A weather report in the list is tagged with what it reports on, which is what
-# lets the context menu act on it.
-window._add_weather_message("EGLL 261150Z 24010KT Q1013", "EGLL", "metar")
-last = window.message_view.message_list.GetItemCount() - 1
-report = window.message_manager.get_message(
-    window.message_view.message_list.GetItemData(last)
-)
-check("weather message is tagged", isinstance(report, WeatherReport), True)
-check("tagged with airport and type", report.key, ("EGLL", "metar"))
-check("sender column shows the type", window.message_view.message_list.GetItemText(last, 0), "METAR")
+# --- menus --------------------------------------------------------------------
 
-# The tick box in the dialog mirrors the real state rather than always starting off.
-from src.gui.dialogs import WeatherDialog
 
-dlg = WeatherDialog(window, "metar", is_watched=window._is_weather_watched)
-dlg.icao_text.SetValue("EGLL")
-check("tick box reflects a watched report", dlg.auto_update_checkbox.GetValue(), True)
-dlg.icao_text.SetValue("KJFK")
-check("tick box clears for an unwatched report", dlg.auto_update_checkbox.GetValue(), False)
-dlg.icao_text.SetValue("EGLL")
-check("tick box re-reflects on return", dlg.auto_update_checkbox.GetValue(), True)
-_, _, wanted = dlg.get_weather_details()
-check("details report the tick box state", wanted, True)
-dlg.Destroy()
+def test_the_menu_bar_carries_the_expected_menus(window):
+    menu_bar = window.GetMenuBar()
 
-window.weather_monitor.clear()
+    titles = [
+        menu_bar.GetMenuLabel(index).replace("&", "")
+        for index in range(menu_bar.GetMenuCount())
+    ]
 
-window.weather_monitor.shutdown()
-window.Destroy()
+    assert titles == MENU_TITLES
 
-print("\n" + "=" * 60)
-if failures:
-    print(f"{len(failures)} FAILURE(S): {failures}")
-    sys.exit(1)
-print("Window integration test passed.")
+
+def test_every_menu_item_has_a_handler(window):
+    missing = [
+        name for name in MENU_HANDLERS if not callable(getattr(window, name, None))
+    ]
+
+    assert missing == []
+
+
+# --- guards -------------------------------------------------------------------
+
+
+def test_a_request_needing_a_station_is_refused_while_logged_off(window):
+    assert window._require_station("test") is False
+
+
+def test_a_request_needing_a_connection_is_refused_while_disconnected(window):
+    assert window._require_connection("test") is False
+
+
+# --- the message list ---------------------------------------------------------
+
+
+def test_a_message_reaches_the_list_even_without_a_sound(window):
+    """The notification sound is optional, and a missing one must not swallow
+    the message it was meant to announce."""
+    window.new_message_sound = None
+    before = window.message_view.message_list.GetItemCount()
+
+    window._add_custom_message("METAR EGLL: TEST", "METAR", play_sound=True)
+
+    assert window.message_view.message_list.GetItemCount() == before + 1
+
+
+def test_a_multi_line_message_is_flattened_in_the_list_but_not_the_detail(window):
+    """The list row is a summary; the detail pane is where the layout matters."""
+    window._add_custom_message(
+        "OCEANIC REQUEST\nBAW123\nENTRY POINT:MALOT", "BAW123"
+    )
+
+    row = last_row(window)
+    list_text = window.message_view.message_list.GetItemText(row, 1)
+    detail = window.message_manager.get_message_detail_text(
+        window.message_view.message_list.GetItemData(row)
+    )
+
+    assert "\n" not in list_text
+    assert "\n" in detail
+
+
+def test_a_weather_message_is_tagged_with_what_it_reports_on(window):
+    """The tag is what lets the context menu start updates for that report."""
+    window._add_weather_message("EGLL 261150Z 24010KT Q1013", "EGLL", "metar")
+
+    row = last_row(window)
+    report = window.message_manager.get_message(
+        window.message_view.message_list.GetItemData(row)
+    )
+
+    assert isinstance(report, WeatherReport)
+    assert report.key == ("EGLL", "metar")
+    assert window.message_view.message_list.GetItemText(row, 0) == "METAR"
+
+
+# --- automatic weather updates ------------------------------------------------
+
+
+def test_the_weather_monitor_starts_idle(window):
+    assert window.weather_monitor.count() == 0
+
+
+def test_a_subscribed_report_reads_as_watched(window):
+    window.weather_monitor.subscribe("EGLL", "metar")
+
+    assert window._is_weather_watched("EGLL", "metar") is True
+
+
+def test_the_context_menu_toggle_stops_and_restarts_updates(window):
+    window.weather_monitor.subscribe("EGLL", "metar")
+
+    window._on_toggle_weather_updates("EGLL", "metar")
+    assert window._is_weather_watched("EGLL", "metar") is False
+
+    window._on_toggle_weather_updates("EGLL", "metar")
+    assert window._is_weather_watched("EGLL", "metar") is True
+
+
+def test_the_tick_box_mirrors_the_live_subscription_state(window):
+    """Opening the dialog always unticked would misreport what is happening,
+    so it has to follow the airport as it is typed."""
+    window.weather_monitor.subscribe("EGLL", "metar")
+    dialog = WeatherDialog(window, "metar", is_watched=window._is_weather_watched)
+
+    try:
+        dialog.icao_text.SetValue("EGLL")
+        assert dialog.auto_update_checkbox.GetValue() is True
+
+        dialog.icao_text.SetValue("KJFK")
+        assert dialog.auto_update_checkbox.GetValue() is False
+
+        dialog.icao_text.SetValue("EGLL")
+        assert dialog.auto_update_checkbox.GetValue() is True
+        assert dialog.get_weather_details()[2] is True
+    finally:
+        dialog.Destroy()

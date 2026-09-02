@@ -180,14 +180,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Two of the files are also self-checking scripts that run without pytest:
-
-```bash
-python tests/test_requests_and_weather.py
-python tests/test_main_window.py
-```
-
-See `tests/README.md` for what each one covers.
+See `tests/README.md` for what each file covers.
 
 ## Acknowledgements
 

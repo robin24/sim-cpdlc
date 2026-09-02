@@ -4,28 +4,30 @@ Offline checks for the CPDLC request formats, the automatic weather update
 logic and the main window wiring. They need no network connection, no running
 simulator and no ACARS logon code.
 
-Run the whole suite from the repository root, which is what CI does:
+Run them from the repository root:
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 ```
 
-Most files are ordinary pytest modules. `test_requests_and_weather.py` and
-`test_main_window.py` are self-checking scripts instead, so they also run on
-their own without pytest installed:
+The GUI tests build real wx windows, dialogs and timers, so they need a desktop
+session; CI runs them on Windows for that reason.
 
-```bash
-python tests/test_requests_and_weather.py
-python tests/test_main_window.py
-```
+| File | Covers |
+| --- | --- |
+| `test_acknowledge_path.py` | Responding to an uplink, end to end from the window |
+| `test_connection_manager.py` | The network boundary: errors, timeouts, reconnection |
+| `test_cpdlc_session.py` | Session state and logon acceptance validation |
+| `test_dialogs.py` | The validation each request dialog applies before submitting |
+| `test_downlink_requests.py` | The exact text of every downlink the client can send |
+| `test_logon_status.py` | Logon state as reported to the user |
+| `test_main_window.py` | The real window: menus, handlers, message list, weather toggles |
+| `test_main_window_wiring.py` | `_init_ui` alone, on a stripped-down frame |
+| `test_message_manager.py` | Message storage, addressing and response options |
+| `test_message_view.py` | The message list and its response context menu |
+| `test_polling_controller.py` | Which messages speed up polling, and the poll intervals |
+| `test_weather_monitor.py` | Weather change detection and the update timer lifecycle |
 
-Under `pytest` these two report no test items; their assertions run as the
-module is imported, and a failure exits non-zero and fails the run.
-
-`test_requests_and_weather.py` asserts the exact text of every downlink message
-the client can send, so a change to a message format will show up here before it
-reaches the network.
-
-`test_main_window.py` builds the real main window and checks the menu structure,
-that every menu item has a handler, and that multi-line messages are flattened
-in the message list but keep their line breaks in the detail pane.
+`test_downlink_requests.py` asserts message text literally, so a change to a
+format shows up there before it reaches the network.
