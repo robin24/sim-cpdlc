@@ -205,7 +205,7 @@ class MainWindow(wx.Frame):
         )
         menu_item_weather = requests_menu.Append(
             wx.ID_ANY,
-            "AT&IS && Weather request\tCTRL+I",
+            "AT&IS and Weather request\tCTRL+I",
             "Request a METAR, TAF or ATIS for an airport.",
         )
         menu_item_weather_subs = requests_menu.Append(

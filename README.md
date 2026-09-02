@@ -100,7 +100,7 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 
 ### Requesting Weather
 
-1. Go to `Requests > ATIS & Weather request`
+1. Go to `Requests > ATIS and Weather request`
 2. Choose the report type: METAR, TAF, short TAF, or ATIS
 3. Enter the airport ICAO code
 4. Optionally check `Keep this report updated automatically`

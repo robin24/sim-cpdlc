@@ -107,7 +107,7 @@ def test_the_requests_menu_carries_every_request(window):
         "Speed change",
         "When can we expect",
         "Telex message",
-        "ATIS & Weather request",
+        "ATIS and Weather request",
         "Automatic weather updates",
     ]
 
