@@ -40,9 +40,6 @@ from src.gui.dialogs import (
     DirectRequestDialog,
     SpeedRequestDialog,
     WhenCanWeDialog,
-    HeadingRequestDialog,
-    ConfirmRequestDialog,
-    EmergencyDialog,
     show_about_dialog,
 )
 from src.utils.message_formatting import extract_message_content
@@ -182,7 +179,7 @@ class MainWindow(wx.Frame):
         # Requests menu
         requests_menu = wx.Menu()
         menu_item_pdc = requests_menu.Append(
-            wx.ID_ANY, "&PDC\tCTRL+P", "Request a pre-departure clearance"
+            wx.ID_ANY, "&PDC", "Request a pre-departure clearance"
         )
         menu_item_logon = requests_menu.Append(
             wx.ID_ANY, "&Logon\tCTRL+L", "Logon to a CPDLC station."
@@ -203,44 +200,20 @@ class MainWindow(wx.Frame):
         menu_item_when = requests_menu.Append(
             wx.ID_ANY, "&When can we expect\tCTRL+W", "Send a when-can-we-expect inquiry."
         )
-        menu_item_heading = requests_menu.Append(
-            wx.ID_ANY, "&Heading\tCTRL+H", "Request a heading."
-        )
-        menu_item_confirm = requests_menu.Append(
-            wx.ID_ANY,
-            "&Confirm assigned\tCTRL+SHIFT+C",
-            "Ask the station to confirm an assigned level or speed.",
-        )
         menu_item_telex = requests_menu.Append(
             wx.ID_ANY, "Telex &message\tCTRL+M", "Send a telex message."
         )
-        menu_bar.Append(requests_menu, "&Requests")
-
-        # Weather menu
-        weather_menu = wx.Menu()
-        menu_item_weather = weather_menu.Append(
+        menu_item_weather = requests_menu.Append(
             wx.ID_ANY,
-            "&Weather request\tCTRL+I",
+            "Weather &request\tCTRL+I",
             "Request a METAR, TAF or ATIS for an airport.",
         )
-        menu_item_weather_subs = weather_menu.Append(
+        menu_item_weather_subs = requests_menu.Append(
             wx.ID_ANY,
-            "&Automatic weather updates\tCTRL+SHIFT+I",
+            "A&utomatic weather updates\tCTRL+SHIFT+I",
             "Show and manage the reports being kept up to date.",
         )
-        menu_bar.Append(weather_menu, "&Weather")
-
-        # Emergency menu
-        emergency_menu = wx.Menu()
-        menu_item_emergency = emergency_menu.Append(
-            wx.ID_ANY, "&Declare emergency", "Declare a MAYDAY or PAN PAN."
-        )
-        menu_item_cancel_emergency = emergency_menu.Append(
-            wx.ID_ANY,
-            "&Cancel emergency",
-            "Tell the station a previously declared emergency is over.",
-        )
-        menu_bar.Append(emergency_menu, "&Emergency")
+        menu_bar.Append(requests_menu, "&Requests")
 
         self.SetMenuBar(menu_bar)
 
@@ -256,16 +229,10 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_direct_request, menu_item_direct)
         self.Bind(wx.EVT_MENU, self.on_speed_request, menu_item_speed)
         self.Bind(wx.EVT_MENU, self.on_when_can_we_expect, menu_item_when)
-        self.Bind(wx.EVT_MENU, self.on_heading_request, menu_item_heading)
-        self.Bind(wx.EVT_MENU, self.on_confirm_request, menu_item_confirm)
         self.Bind(wx.EVT_MENU, self.on_telex, menu_item_telex)
         self.Bind(wx.EVT_MENU, self.on_weather_request, menu_item_weather)
         self.Bind(
             wx.EVT_MENU, self.on_weather_subscriptions, menu_item_weather_subs
-        )
-        self.Bind(wx.EVT_MENU, self.on_declare_emergency, menu_item_emergency)
-        self.Bind(
-            wx.EVT_MENU, self.on_cancel_emergency, menu_item_cancel_emergency
         )
         self.Bind(wx.EVT_MENU, self.on_exit, menu_item_exit)
 
@@ -744,116 +711,6 @@ class MainWindow(wx.Frame):
             wx.OK | wx.ICON_INFORMATION,
         )
         return False
-
-    def _require_station(self, action):
-        """Check we are connected and logged on, telling the user if we are not.
-
-        Args:
-            action: What the user was trying to do, for the message text
-
-        Returns:
-            bool: True if connected and logged on to a station
-        """
-        if not self._require_connection(action):
-            return False
-
-        if self.cpdlc_session.is_logged_on():
-            return True
-
-        wx.MessageBox(
-            f"You must be logged on to a station to {action}.",
-            "Not Logged On",
-            wx.OK | wx.ICON_INFORMATION,
-        )
-        return False
-
-    def _handle_request_result(self, success, message, description):
-        """Log a sent request in the message list, or report why it failed.
-
-        Args:
-            success: Whether the request was sent
-            message: The sent message text, or the error description
-            description: Short phrase naming the request, for the error dialog
-        """
-        if success:
-            if message:
-                self._add_custom_message(message)
-            self.polling_controller.set_active_polling()
-            return
-
-        error_detail = f": {message}" if message else ""
-        wx.MessageBox(
-            f"Failed to send {description}{error_detail}.",
-            "Error",
-            wx.OK | wx.ICON_ERROR,
-        )
-
-    def on_heading_request(self, _):
-        """Request a heading from the current station."""
-        if not self._require_station("request a heading"):
-            return
-
-        dlg = HeadingRequestDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
-            success, message = self.cpdlc_session.send_heading_request(
-                dlg.get_heading()
-            )
-            self._handle_request_result(success, message, "heading request")
-
-        dlg.Destroy()
-
-    def on_confirm_request(self, _):
-        """Ask the station to confirm an assigned level or speed."""
-        if not self._require_station("send a request"):
-            return
-
-        dlg = ConfirmRequestDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
-            success, message = self.cpdlc_session.send_query(dlg.get_message())
-            self._handle_request_result(success, message, "request")
-
-        dlg.Destroy()
-
-    def on_declare_emergency(self, _):
-        """Declare a MAYDAY or PAN PAN over CPDLC."""
-        if not self._require_station("declare an emergency"):
-            return
-
-        dlg = EmergencyDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
-            (
-                is_mayday,
-                fuel,
-                souls,
-                diverting_to,
-                via_route,
-                free_text,
-            ) = dlg.get_emergency_details()
-
-            success, message = self.cpdlc_session.send_emergency(
-                is_mayday, fuel, souls, diverting_to, via_route, free_text
-            )
-            self._handle_request_result(success, message, "emergency declaration")
-
-        dlg.Destroy()
-
-    def on_cancel_emergency(self, _):
-        """Cancel a previously declared emergency."""
-        if not self._require_station("cancel an emergency"):
-            return
-
-        if (
-            wx.MessageBox(
-                "Send CANCEL EMERGENCY to the current station?",
-                "Confirm",
-                wx.YES_NO | wx.ICON_QUESTION,
-            )
-            != wx.YES
-        ):
-            return
-
-        success, message = self.cpdlc_session.send_cancel_emergency()
-        self._handle_request_result(success, message, "emergency cancellation")
 
     def on_weather_request(self, _):
         """Request a METAR, TAF or ATIS, optionally keeping it up to date."""

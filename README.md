@@ -11,9 +11,6 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 - **CPDLC Messaging**: Send and receive CPDLC messages with ATC
 - **Pre-Departure Clearance (PDC)**: Request PDCs from departure airports
 - **Altitude Change Requests**: Easily request altitude changes during flight
-- **Heading Requests**: Request a heading from the controlling station
-- **Confirm Assigned**: Ask the station to confirm your assigned level or speed
-- **Emergency Messages**: Declare a MAYDAY or PAN PAN, and cancel it again
 - **Weather Information**: Request METAR, TAF, short TAF and ATIS for any airport
 - **Automatic Weather Updates**: Keep a report up to date and be notified only when it
   actually changes
@@ -74,7 +71,7 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 
 ### Requesting Pre-Departure Clearance (PDC)
 
-1. Go to `Requests > PDC` (or press CTRL+P)
+1. Go to `Requests > PDC`
 2. Enter:
    - Origin airport ICAO code
    - Destination airport ICAO code
@@ -93,28 +90,6 @@ The main window of Sim-CPDLC is very simple, and contains the following:
    - (Optional) Reason for the request
 3. Click OK to send the request
 
-### Requesting a Heading
-
-1. Go to `Requests > Heading` (or press CTRL+H)
-2. Enter the heading in degrees
-3. Click OK
-
-### Confirming an Assigned Clearance
-
-1. Go to `Requests > Confirm assigned` (or press CTRL+SHIFT+C)
-2. Choose whether to confirm the assigned level or the assigned speed
-3. Click OK
-
-### Declaring an Emergency
-
-1. Go to `Emergency > Declare emergency`
-2. Choose PAN PAN for an urgency or MAYDAY for a distress message
-3. Optionally add fuel remaining and souls on board, a diversion, and any
-   further detail
-4. Click Send
-
-`Emergency > Cancel emergency` tells the station the emergency is over.
-
 ### Sending TELEX Messages
 
 1. Go to `Requests > Telex message`
@@ -125,9 +100,8 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 
 ### Requesting Weather
 
-1. Go to `Weather > Weather request`
-2. Choose the report type: METAR, TAF, short TAF, or ATIS from VATSIM, IVAO or
-   PilotEdge
+1. Go to `Requests > Weather request`
+2. Choose the report type: METAR, TAF, short TAF, or ATIS
 3. Enter the airport ICAO code
 4. Optionally tick `Keep this report updated automatically`
 5. Click OK
@@ -154,7 +128,7 @@ To stop watching one, use whichever is closest to hand:
 - Request the same report again with the tick box cleared. The tick box always
   shows whether that airport and report type are currently being watched, so it
   turns updates off as readily as on
-- `Weather > Automatic weather updates` lists everything being watched, and lets
+- `Requests > Automatic weather updates` lists everything being watched, and lets
   you check them all immediately, stop one, or stop all
 - The interval is set in `File > Settings` and defaults to 5 minutes. Shorter
   intervals put more load on the ACARS network, so only lower it if you are

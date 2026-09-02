@@ -16,7 +16,7 @@ from src.config import DEFAULT_CONFIG
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 
-MENU_TITLES = ["File", "Requests", "Weather", "Emergency"]
+MENU_TITLES = ["File", "Requests"]
 
 # wx does not expose which handler a menu item is bound to, so the menus are
 # checked for shape and the handlers are checked for existence by name.
@@ -33,13 +33,9 @@ MENU_HANDLERS = [
     "on_direct_request",
     "on_speed_request",
     "on_when_can_we_expect",
-    "on_heading_request",
-    "on_confirm_request",
     "on_telex",
     "on_weather_request",
     "on_weather_subscriptions",
-    "on_declare_emergency",
-    "on_cancel_emergency",
 ]
 
 
@@ -93,6 +89,28 @@ def test_the_menu_bar_carries_the_expected_menus(window):
     assert titles == MENU_TITLES
 
 
+def test_the_requests_menu_carries_every_request(window):
+    """One Requests menu is enough at this scope, so everything the client can
+    ask for has to be reachable from it."""
+    menu_bar = window.GetMenuBar()
+    requests = menu_bar.GetMenu(menu_bar.FindMenu("Requests"))
+
+    labels = [item.GetItemLabelText() for item in requests.GetMenuItems()]
+
+    assert labels == [
+        "PDC",
+        "Logon",
+        "Logoff",
+        "Altitude change",
+        "Direct to",
+        "Speed change",
+        "When can we expect",
+        "Telex message",
+        "Weather request",
+        "Automatic weather updates",
+    ]
+
+
 def test_every_menu_item_has_a_handler(window):
     missing = [
         name for name in MENU_HANDLERS if not callable(getattr(window, name, None))
@@ -102,10 +120,6 @@ def test_every_menu_item_has_a_handler(window):
 
 
 # --- guards -------------------------------------------------------------------
-
-
-def test_a_request_needing_a_station_is_refused_while_logged_off(window):
-    assert window._require_station("test") is False
 
 
 def test_a_request_needing_a_connection_is_refused_while_disconnected(window):
