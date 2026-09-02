@@ -126,8 +126,9 @@ To stop watching one, use whichever is closest to hand:
 - Select the report in the message list and press the Applications key (or
   right-click) for `Stop automatic updates`
 - Request the same report again with the tick box cleared. The tick box always
-  shows whether that airport and report type are currently being watched, so it
-  turns updates off as readily as on
+  shows whether that airport and report type are currently being watched
+  (unless you have already ticked or unticked it yourself in that dialog), so
+  it turns updates off as readily as on
 - `Requests > Automatic weather updates` lists everything being watched, and lets
   you check them all immediately, stop one, or stop all
 - The interval is set in `File > Settings` and defaults to 5 minutes. Shorter

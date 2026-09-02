@@ -154,15 +154,14 @@ def extract_atis_letter(text, icao=None):
         return ""
 
     words = _NON_REPORT_CHARS.sub(" ", text.upper()).split()
-    markers = _LETTER_MARKERS
 
     for index in range(len(words) - 1):
-        if words[index] not in markers:
+        if words[index] not in _LETTER_MARKERS:
             continue
 
         candidate = words[index + 1]
         # "EGLL ATIS INFORMATION K" — step over chained markers.
-        if candidate in markers:
+        if candidate in _LETTER_MARKERS:
             continue
         if len(candidate) == 1 and candidate.isalpha():
             return candidate
@@ -204,7 +203,7 @@ def describe_report(text, info_type, icao=None):
         icao: Optional airport ICAO code.
 
     Returns:
-        str: e.g. "ATIS (VATSIM) EGLL information K" or "METAR EGLL".
+        str: e.g. "ATIS EGLL information K" or "METAR EGLL".
     """
     label = report_type_label(info_type)
     station = f" {icao.upper()}" if icao else ""

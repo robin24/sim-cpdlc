@@ -31,9 +31,11 @@ class WeatherDialog(wx.Dialog):
             parent: The parent window
             default_type: Report type key to preselect
             is_watched: Callable(icao, info_type) returning whether that report
-                is already being kept up to date. The tick box mirrors it, so it
-                always shows the real state and can be used to turn updates off
-                as well as on.
+                is already being kept up to date. Until the user operates the
+                tick box themselves, it mirrors this: the box always shows the
+                real state and can be used to turn updates off as well as on.
+                From that point on it is theirs, and stops following
+                is_watched.
         """
         self.is_watched = is_watched
         # Set once the user operates the tick box themselves. Until then the
