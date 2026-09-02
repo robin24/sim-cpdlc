@@ -1,17 +1,26 @@
 """Controller for managing CPDLC polling behavior."""
 
+import random
 import time
 import logging
 import wx
 
 from hoppie_connector import HoppieMessage, CpdlcMessage, TelexMessage
+from src.config import MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
 from src.model.connection_manager import ConnectionManager
 from src.model.message_manager import CPDLC_RESPONSES
 from src.utils.message_formatting import extract_message_content
 
 
 class PollingController:
-    """Controls polling behavior for CPDLC communications."""
+    """Controls polling behavior for CPDLC communications.
+
+    Hoppie asks clients to poll "once between every 45 and 75 seconds, randomly
+    timed so that the average server load is stable", and allows a faster
+    once-per-20-seconds burst while a reply is expected. Each tick therefore
+    schedules the next one itself rather than running on a fixed repeat, so the
+    idle interval can be re-randomised every time.
+    """
 
     def __init__(
         self,
@@ -21,6 +30,7 @@ class PollingController:
         default_poll_interval=60000,  # 60 seconds
         active_poll_interval=20000,  # 20 seconds
         inactivity_timeout=300000,  # 5 minutes
+        poll_interval_range=None,
     ):
         """Initialize the polling controller.
 
@@ -28,9 +38,13 @@ class PollingController:
             logger: Application logger
             connection_manager: Connection manager instance
             message_callback: Callback for received messages
-            default_poll_interval: Default polling interval in milliseconds
-            active_poll_interval: Active polling interval in milliseconds
-            inactivity_timeout: Inactivity timeout in milliseconds
+            default_poll_interval: Nominal idle interval in milliseconds, used
+                only when a jitter range is not available
+            active_poll_interval: Interval used while a reply is expected
+            inactivity_timeout: How long to stay in the faster mode after the
+                last activity, in milliseconds
+            poll_interval_range: (minimum, maximum) idle interval in
+                milliseconds that each idle poll is randomised within
         """
         self.logger = logger
         self.connection_manager = connection_manager
@@ -38,10 +52,40 @@ class PollingController:
         self.default_poll_interval = default_poll_interval
         self.active_poll_interval = active_poll_interval
         self.inactivity_timeout = inactivity_timeout
+        self.poll_interval_range = poll_interval_range or (
+            MIN_POLL_INTERVAL,
+            MAX_POLL_INTERVAL,
+        )
         self.last_activity_time = 0
         self.poll_timer = None
+        # When the pending one-shot is due, as time.monotonic(). wx.Timer
+        # cannot report how much of a one-shot interval remains, so
+        # set_active_polling() needs this to tell a poll that is already
+        # imminent from one that is a minute off.
+        self._next_poll_at = None
+        self._active_mode = False
+        self._stopped = True
         self.parent_window = None
         self._reported_failure = False
+
+    def next_interval(self):
+        """Return the delay to wait before the next poll.
+
+        Returns:
+            int: Milliseconds until the next poll. Fixed while a reply is
+                expected, randomised within the permitted band otherwise.
+        """
+        if self._active_mode:
+            return self.active_poll_interval
+
+        minimum, maximum = self.poll_interval_range
+        if minimum >= maximum:
+            return minimum
+        return random.randint(minimum, maximum)
+
+    def is_active_mode(self):
+        """Check whether the faster polling rate is currently in use."""
+        return self._active_mode
 
     def start(self, parent_window):
         """Start the polling timer.
@@ -50,15 +94,22 @@ class PollingController:
             parent_window: The parent window for the timer
         """
         self.parent_window = parent_window
-        self.poll_timer = wx.Timer(parent_window)
-        parent_window.Bind(wx.EVT_TIMER, self.on_poll_timer, self.poll_timer)
-        self.poll_timer.Start(self.default_poll_interval)
+        if self.poll_timer is None:
+            self.poll_timer = wx.Timer(parent_window)
+            parent_window.Bind(wx.EVT_TIMER, self.on_poll_timer, self.poll_timer)
+
+        self._active_mode = False
+        self._stopped = False
+        self._schedule_next()
         self.logger.info(
-            f"Started polling timer with interval {self.default_poll_interval}ms"
+            "Started polling timer, idle interval randomised between "
+            f"{self.poll_interval_range[0]}ms and {self.poll_interval_range[1]}ms"
         )
 
     def stop(self):
         """Stop the polling timer."""
+        self._stopped = True
+        self._next_poll_at = None
         if self.poll_timer and self.poll_timer.IsRunning():
             self.poll_timer.Stop()
             self.logger.info("Stopped polling timer")
@@ -69,7 +120,17 @@ class PollingController:
         Returns:
             bool: True if running, False otherwise
         """
-        return self.poll_timer and self.poll_timer.IsRunning()
+        return bool(self.poll_timer and self.poll_timer.IsRunning())
+
+    def _schedule_next(self):
+        """Arrange the next poll, unless polling has been stopped."""
+        if self._stopped or self.poll_timer is None:
+            return
+
+        interval = self.next_interval()
+        self._next_poll_at = time.monotonic() + interval / 1000
+        self.poll_timer.StartOnce(interval)
+        self.logger.debug(f"Next poll in {interval}ms")
 
     def on_poll_timer(self, event):
         """Handle poll timer event."""
@@ -78,50 +139,63 @@ class PollingController:
             self.stop()
             return
 
+        # The timer is one-shot, so the next tick only happens if this handler
+        # arranges it. Message handling reaches into the GUI, SimConnect and a
+        # nested logon, so anything raising there would otherwise end polling
+        # for the rest of the session. stop() sets _stopped, so the
+        # reconnection-failure branch below still ends polling deliberately.
         try:
-            messages, poll_status = self.connection_manager.poll()
-        except Exception as e:
-            self.logger.error(f"Unexpected error during poll: {e}")
-            return
+            try:
+                messages, poll_status = self.connection_manager.poll()
+            except Exception as e:
+                self.logger.error(f"Unexpected error during poll: {e}")
+                return
 
-        # Surface link state: a failing poll is otherwise invisible, leaving the
-        # status bar reading "Connected" through a total outage.
-        self._report_connection_state()
+            # Surface link state: a failing poll is otherwise invisible, leaving
+            # the status bar reading "Connected" through a total outage.
+            self._report_connection_state()
 
-        # Process received messages
-        if messages:
-            self.logger.info(f"Received {len(messages)} new message(s)")
-            for message in messages:
-                self.logger.info(f"Received message: {message}")
-                if self.message_callback:
-                    self.message_callback(message)
+            # Process received messages
+            if messages:
+                self.logger.info(f"Received {len(messages)} new message(s)")
+                for message in messages:
+                    self.logger.info(f"Received message: {message}")
+                    if self.message_callback:
+                        try:
+                            self.message_callback(message)
+                        except Exception:
+                            # app.spec builds with console=False, so without
+                            # this the traceback reaches neither the log file
+                            # nor the pilot - the message just vanishes. Still
+                            # re-raised: it must not be swallowed here.
+                            self.logger.exception("Error in message callback")
+                            raise
 
-                # Check if this message should trigger faster polling
-                if self.should_increase_polling_rate(message):
-                    self.set_active_polling()
+                    # Check if this message should trigger faster polling
+                    if self.should_increase_polling_rate(message):
+                        self.set_active_polling()
 
-        # Check if we should return to default polling after inactivity
-        self.check_polling_timeout()
+            # Check if we should return to default polling after inactivity
+            self.check_polling_timeout()
 
-        # Check if we need to attempt reconnection
-        if self.connection_manager.should_attempt_reconnection():
-            self.logger.warning(
-                "Maximum connection failures reached, attempting reconnection"
-            )
-            success = self.connection_manager.attempt_reconnection()
-            if success:
-                self.logger.info("Reconnection successful")
-                self._set_status("Reconnected.")
-                # Restart the poll timer if it's not running
-                if not self.is_running():
-                    self.poll_timer.Start(self.default_poll_interval)
-            else:
-                self.logger.error("Reconnection failed")
-                self._set_status("Connection lost. Reconnect to continue.")
-                # attempt_reconnection() cleared cnx, so the next tick would
-                # stop the timer and nothing would ever restart it. Stop here
-                # and let the user reconnect deliberately.
-                self.stop()
+            # Check if we need to attempt reconnection
+            if self.connection_manager.should_attempt_reconnection():
+                self.logger.warning(
+                    "Maximum connection failures reached, attempting reconnection"
+                )
+                success = self.connection_manager.attempt_reconnection()
+                if success:
+                    self.logger.info("Reconnection successful")
+                    self._set_status("Reconnected.")
+                else:
+                    self.logger.error("Reconnection failed")
+                    self._set_status("Connection lost. Reconnect to continue.")
+                    # attempt_reconnection() cleared cnx, so the next tick would
+                    # stop the timer and nothing would ever restart it. Stop here
+                    # and let the user reconnect deliberately.
+                    self.stop()
+        finally:
+            self._schedule_next()
 
     def _set_status(self, text):
         """Show a short connection message in the parent window's status bar."""
@@ -144,29 +218,32 @@ class PollingController:
 
     def set_active_polling(self):
         """Switch to more frequent polling during active communication."""
-        if not self.poll_timer:
-            return
-
-        current_interval = self.poll_timer.GetInterval()
-        if current_interval != self.active_poll_interval:
-            self.logger.debug(
-                f"Switching to active polling interval: {self.active_poll_interval}ms"
-            )
-            self.poll_timer.Stop()
-            self.poll_timer.Start(self.active_poll_interval)
+        was_active = self._active_mode
+        self._active_mode = True
 
         # Update the last activity timestamp
         self.last_activity_time = time.time()
         self.logger.debug(f"Updated last activity time: {self.last_activity_time}")
 
-    def check_polling_timeout(self):
-        """Check if we should return to default polling after period of inactivity."""
-        if not self.poll_timer:
+        if not was_active:
+            self.logger.debug(
+                f"Switching to active polling interval: {self.active_poll_interval}ms"
+            )
+
+        # Bring the next poll forward if it is further off than the active
+        # rate, and otherwise leave it alone. Restarting unconditionally would
+        # push a poll that is nearly due out to a fresh active interval, so a
+        # pilot acting faster than that interval would never get one at all.
+        if not self.is_running() or self._next_poll_at is None:
             return
 
-        # Skip if we're already at the default interval
-        current_interval = self.poll_timer.GetInterval()
-        if current_interval == self.default_poll_interval:
+        if self._next_poll_at - time.monotonic() > self.active_poll_interval / 1000:
+            self.poll_timer.Stop()
+            self._schedule_next()
+
+    def check_polling_timeout(self):
+        """Check if we should return to default polling after period of inactivity."""
+        if not self._active_mode:
             return
 
         current_time = time.time()
@@ -176,10 +253,10 @@ class PollingController:
         # If more than inactivity_timeout has passed, return to default polling
         if elapsed_ms > self.inactivity_timeout:
             self.logger.info(
-                f"Inactivity timeout reached ({elapsed:.1f}s). Returning to default polling interval of {self.default_poll_interval}ms"
+                f"Inactivity timeout reached ({elapsed:.1f}s). Returning to the "
+                "randomised idle polling interval"
             )
-            self.poll_timer.Stop()
-            self.poll_timer.Start(self.default_poll_interval)
+            self._active_mode = False
 
     def should_increase_polling_rate(self, message):
         """Determine if this message should trigger faster polling.

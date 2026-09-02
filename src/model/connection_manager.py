@@ -13,6 +13,7 @@ from src.config import (
     MAX_CONNECTION_FAILURES,
     NETWORK_TIMEOUT,
 )
+from src.utils.weather_parsing import report_type_label, report_type_packet
 
 
 # Transport failures worth retrying. The builtin ConnectionError is what
@@ -84,10 +85,10 @@ class ConnectionManager:
     they would escape the `except HoppieError` in every caller and disappear
     into the wx event loop, leaving a request silently doing nothing at all.
 
-    Transport failures are also counted -- polls into connection_failures and
-    sends into send_failures -- so a link that is dead for sends but alive for
-    polls still reaches the reconnection logic instead of being reset by the
-    next successful poll.
+    Transport failures are also counted -- polls into connection_failures,
+    sends into send_failures, and information requests into info_failures.
+    Only the first two reach failure_count(): weather runs on a worker thread
+    and a failing ATIS is no evidence the CPDLC link is down.
     """
 
     def __init__(self, logger, message_callback=None):
@@ -107,16 +108,22 @@ class ConnectionManager:
         # clear them, or a link that passes GETs but blocks POSTs would never
         # accumulate enough failures to trigger a reconnection.
         self.send_failures = 0
+        # Information requests run on the weather monitor's worker thread and
+        # are auxiliary to the CPDLC link, so their failures are counted apart
+        # from the ones that decide a reconnection is due.
+        self.info_failures = 0
         self.max_connection_failures = MAX_CONNECTION_FAILURES
         self.message_callback = message_callback
 
-    def _call(self, operation, is_send=False):
+    def _call(self, operation, is_send=False, is_info=False):
         """Run a hoppie_connector call, normalising its failure modes.
 
         Args:
             operation: A zero-argument callable performing the request
             is_send: True for outbound message sends, which count towards
                 send_failures rather than connection_failures
+            is_info: True for information requests, which count towards
+                info_failures and never towards a reconnection
 
         Returns:
             Whatever the operation returns
@@ -127,7 +134,7 @@ class ConnectionManager:
         try:
             result = operation()
         except TRANSPORT_ERRORS as exc:
-            raise self._transport_failure(exc, is_send) from exc
+            raise self._transport_failure(exc, is_send, is_info) from exc
         except PROTOCOL_ERRORS as exc:
             # Not a link problem: a too-long telex or a bad callsign fails here
             # and must not push the client towards a reconnection.
@@ -137,27 +144,40 @@ class ConnectionManager:
 
         if is_send:
             self.send_failures = 0
+        elif is_info:
+            self.info_failures = 0
         return result
 
-    def _transport_failure(self, exc, is_send=False):
+    def _transport_failure(self, exc, is_send=False, is_info=False):
         """Count a transport failure and build the HoppieError for it.
 
         Args:
             exc: The original transport exception
             is_send: True if the failure was on an outbound send
+            is_info: True if the failure was on an information request
 
         Returns:
             HoppieError: The error to raise, tagged as a transport failure
         """
         if is_send:
             self.send_failures += 1
-            count = self.send_failures
-            kind = "Send failure"
+            message = (
+                f"Send failure count: {self.send_failures}/"
+                f"{self.max_connection_failures}"
+            )
+        elif is_info:
+            self.info_failures += 1
+            # info_failures has no cap and gates nothing, so printing it
+            # against max_connection_failures would read like a breached
+            # threshold that was never being measured.
+            message = f"Information request failure count: {self.info_failures}"
         else:
             self.connection_failures += 1
-            count = self.connection_failures
-            kind = "Connection failure"
-        self.logger.warning(f"{kind} count: {count}/{self.max_connection_failures}")
+            message = (
+                f"Connection failure count: {self.connection_failures}/"
+                f"{self.max_connection_failures}"
+            )
+        self.logger.warning(message)
         error = HoppieError(redact(exc))
         error.is_transport = True
         return error
@@ -228,6 +248,7 @@ class ConnectionManager:
         self.network_type = network_type
         self.connection_failures = 0
         self.send_failures = 0
+        self.info_failures = 0
         self.logger.info(
             f"Successfully connected as {callsign} to {network_type} network"
         )
@@ -246,6 +267,7 @@ class ConnectionManager:
         self.network_type = None
         self.connection_failures = 0
         self.send_failures = 0
+        self.info_failures = 0
         self.logger.info("Successfully disconnected")
 
     def poll(self):
@@ -319,6 +341,7 @@ class ConnectionManager:
             # Reset connection failures counter
             self.connection_failures = 0
             self.send_failures = 0
+            self.info_failures = 0
             self.logger.info(f"Reconnection successful for {self.callsign}")
             return True
         except HoppieError as exc:
@@ -402,7 +425,7 @@ class ConnectionManager:
             return response
 
         try:
-            response = self._call(_fetch)
+            response = self._call(_fetch, is_info=True)
         except HoppieError as exc:
             self.logger.error(f"{label} request failed: {exc}")
             raise HoppieError(f"{label} request failed: {exc}") from exc
@@ -425,6 +448,34 @@ class ConnectionManager:
             self.logger.error(f"Unexpected {label} response: {body}")
             raise HoppieError(f"Unexpected response: {body}")
 
+    def send_info_request(self, info_type, icao):
+        """Fetch a weather/information report via the Hoppie "inforeq" interface.
+
+        Blocking — callers that run on a timer should invoke this from a
+        worker thread.
+
+        Args:
+            info_type: Report type key (e.g. "metar", "taf", "vatatis")
+            icao: Airport ICAO code
+
+        Returns:
+            str: The report text
+
+        Raises:
+            HoppieError: If not connected or the request fails
+        """
+        label = report_type_label(info_type)
+        packet = f"{report_type_packet(info_type)} {icao}"
+
+        report_text = self._send_info_request(icao, packet, label)
+        if not report_text:
+            # A station with nothing to report answers "ok" with an empty
+            # envelope, which would otherwise surface as a blank message.
+            self.logger.warning(f"Empty {label} response for {icao}")
+            raise HoppieError(f"No {label} available for {icao}")
+
+        return report_text
+
     def send_metar_request(self, icao):
         """Send a METAR information request.
 
@@ -437,14 +488,10 @@ class ConnectionManager:
         Raises:
             HoppieError: If not connected or request fails
         """
-        return self._send_info_request(icao, f"metar {icao}", "METAR")
+        return self.send_info_request("metar", icao)
 
     def send_atis_request(self, icao):
         """Send an ATIS information request.
-
-        Note:
-            vatatis is a Hoppie-specific feature, so this request is only
-            meaningful when connected to the Hoppie network.
 
         Args:
             icao: Airport ICAO code
@@ -455,4 +502,4 @@ class ConnectionManager:
         Raises:
             HoppieError: If not connected or request fails
         """
-        return self._send_info_request(icao, f"vatatis {icao}", "ATIS")
+        return self.send_info_request("vatatis", icao)

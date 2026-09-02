@@ -378,6 +378,34 @@ def test_an_information_request_requires_a_connection(logger):
         cm.send_metar_request("EDDF")
 
 
+def test_a_failing_weather_request_does_not_trip_reconnection(logger, monkeypatch):
+    """Weather is auxiliary. Three timed-out fetches used to spend the whole
+    CPDLC failure budget, so the next failed poll tore down a working link."""
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, raises=requests.exceptions.Timeout("timed out"))
+
+    for icao in ("EGLL", "EGKK", "EGSS"):
+        with pytest.raises(HoppieError):
+            cm.send_info_request("metar", icao)
+
+    assert cm.info_failures == 3
+    assert cm.failure_count() == 0
+    assert cm.poll_failed() is False
+    assert cm.should_attempt_reconnection() is False
+
+
+def test_a_weather_request_that_recovers_clears_its_own_count(logger, monkeypatch):
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, raises=requests.exceptions.Timeout("timed out"))
+    with pytest.raises(HoppieError):
+        cm.send_info_request("metar", "EGLL")
+
+    serving(monkeypatch, "ok {server info {EGLL 261150Z 24010KT}}")
+    cm.send_info_request("metar", "EGLL")
+
+    assert cm.info_failures == 0
+
+
 # --- request timeout ----------------------------------------------------------
 
 

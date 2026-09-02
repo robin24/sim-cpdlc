@@ -6,6 +6,7 @@ from typing import Optional, Callable, Tuple
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from src.model.connection_manager import ConnectionManager
+from src.utils.weather_parsing import report_type_label
 
 
 class CpdlcSession:
@@ -157,7 +158,7 @@ class CpdlcSession:
 
         Args:
             altitude: The requested altitude (e.g. "FL350")
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text) where success is True if request sent successfully,
@@ -280,7 +281,7 @@ class CpdlcSession:
 
         Args:
             fix: The waypoint/fix name
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text)
@@ -317,7 +318,7 @@ class CpdlcSession:
         Args:
             speed: The speed value (e.g. "082" for Mach, "300" for knots)
             is_mach: True for Mach, False for knots
-            reason: Optional reason — "WEATHER" or "PERFORMANCE"
+            reason: Optional reason — "WEATHER" or "AIRCRAFT PERFORMANCE"
 
         Returns:
             tuple: (success, message_text)
@@ -515,3 +516,19 @@ class CpdlcSession:
             return False, str(exc)
 
         return True, message
+
+    def request_weather(self, info_type: str, icao: str) -> Tuple[bool, Optional[str]]:
+        """Request a weather/information report for an airport.
+
+        Args:
+            info_type: Report type key ("metar", "taf", "shorttaf", "vatatis")
+            icao: Airport ICAO code
+
+        Returns:
+            tuple: (success, report_text_or_error)
+        """
+        return self._request_info(
+            icao,
+            report_type_label(info_type),
+            lambda code: self.connection_manager.send_info_request(info_type, code),
+        )

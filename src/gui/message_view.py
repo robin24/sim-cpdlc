@@ -2,7 +2,7 @@
 
 import wx
 
-from src.model.message_manager import MessageManager
+from src.model.message_manager import MessageManager, WeatherReport
 
 
 class MessageView:
@@ -15,6 +15,8 @@ class MessageView:
         message_manager: MessageManager,
         on_acknowledge,
         get_current_station,
+        on_toggle_weather_updates=None,
+        is_weather_watched=None,
     ):
         """Initialize the message view.
 
@@ -25,12 +27,20 @@ class MessageView:
             on_acknowledge: Callback for message acknowledgement
             get_current_station: Callable returning the station currently
                 logged on, used to scope responses to the live dialogue
+            on_toggle_weather_updates: Callback(icao, info_type, text) to
+                start or stop automatic updates for a weather report. The text
+                seeds change detection, so re-enabling updates on a report
+                already shown does not announce it again
+            is_weather_watched: Callable(icao, info_type) returning whether a
+                report is currently being kept up to date
         """
         self.parent = parent
         self.logger = logger
         self.message_manager = message_manager
         self.on_acknowledge = on_acknowledge
         self.get_current_station = get_current_station
+        self.on_toggle_weather_updates = on_toggle_weather_updates
+        self.is_weather_watched = is_weather_watched
 
         self._init_ui()
 
@@ -111,6 +121,13 @@ class MessageView:
             return
 
         message_id = self.message_list.GetItemData(selected_index)
+        message = self.message_manager.get_message(message_id)
+
+        # Weather reports get their own menu, so automatic updates can be
+        # started or stopped from the report itself.
+        if isinstance(message, WeatherReport):
+            self._show_weather_menu(message)
+            return
 
         # needs_acknowledgement resolves the ID itself and rejects anything
         # that is not an unanswered CPDLC message from the current station.
@@ -145,6 +162,42 @@ class MessageView:
         for menu_item in menu_items:
             self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
 
+        menu.Destroy()
+
+    def _show_weather_menu(self, report: WeatherReport):
+        """Show the context menu for a weather report.
+
+        Args:
+            report: The selected WeatherReport
+        """
+        if not self.on_toggle_weather_updates:
+            return
+
+        watched = bool(
+            self.is_weather_watched
+            and self.is_weather_watched(report.icao, report.info_type)
+        )
+
+        label = (
+            f"Stop automatic updates for {report.label} {report.icao}"
+            if watched
+            else f"Start automatic updates for {report.label} {report.icao}"
+        )
+        self.logger.debug(f"Showing weather context menu: {label}")
+
+        menu = wx.Menu()
+        menu_item = menu.Append(wx.ID_ANY, label)
+        self.parent.Bind(
+            wx.EVT_MENU,
+            lambda event, r=report: self.on_toggle_weather_updates(
+                r.icao, r.info_type, r.text
+            ),
+            menu_item,
+        )
+
+        self.parent.PopupMenu(menu)
+
+        self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
         menu.Destroy()
 
     def _handle_acknowledge(self, message_id: int, response: str):

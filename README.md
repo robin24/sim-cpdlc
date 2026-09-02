@@ -11,6 +11,9 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 - **CPDLC Messaging**: Send and receive CPDLC messages with ATC
 - **Pre-Departure Clearance (PDC)**: Request PDCs from departure airports
 - **Altitude Change Requests**: Easily request altitude changes during flight
+- **Weather Information**: Request METAR, TAF, short TAF and ATIS for any airport
+- **Automatic Weather Updates**: Keep a report up to date and be notified only when it
+  actually changes
 - **TELEX Messaging**: Send free-text messages to any station
 - **SimBrief Integration**: Automatically fetch flight details from your SimBrief flight plans
 - **Message History**: View and respond to all received messages
@@ -95,6 +98,44 @@ The main window of Sim-CPDLC is very simple, and contains the following:
    - Message text
 3. Click OK to send the message
 
+### Requesting Weather
+
+1. Go to `Requests > ATIS and Weather request`
+2. Choose the report type: METAR, TAF, short TAF, or ATIS
+3. Enter the airport ICAO code
+4. Optionally check `Keep this report updated automatically`
+5. Click OK
+
+The report is added to the message list and the notification sound plays, just
+as it does for a message from a controller.
+
+### Automatic Weather Updates
+
+Neither Hoppie nor SayIntentions push weather to the aircraft, so an automatic
+update is a re-request on a timer. When a report is being kept up to date, the
+client requests it again periodically and notifies you **only when it has
+actually changed**: for an ATIS that means a new information letter, and for a
+METAR or TAF a change to the report itself. A re-worded ATIS carrying the same
+letter stays silent.
+
+- Check `Keep this report updated automatically` in the weather request dialog to
+  start watching a report
+
+To stop watching one, use whichever is closest to hand:
+
+- Select the report in the message list and press the Applications key (or
+  right-click) for `Stop automatic updates`
+- Request the same report again with the checkbox cleared. The checkbox always
+  shows whether that airport and report type are currently being watched
+  (unless you have already checked or unchecked it yourself in that dialog), so
+  it turns updates off as readily as on
+- `Requests > Automatic weather updates` lists everything being watched, and lets
+  you check them all immediately, stop one, or stop all
+- The interval is set in `File > Settings` and defaults to 5 minutes. Shorter
+  intervals put more load on the ACARS network, so only lower it if you are
+  watching an ATIS that changes often
+- Watching stops automatically when you disconnect from the network
+
 ### Responding to Messages
 
 1. After selecting a message that requires a response, either press the Application key or right-click to bring up the context menu
@@ -104,6 +145,17 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 
 1. Click `File > Disconnect` when you're finished
 2. If you're logged on to a station, the application will automatically send a logoff message
+
+## Running the Tests
+
+Offline checks that need no network connection, simulator or logon code:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+See `tests/README.md` for what each file covers.
 
 ## Acknowledgements
 

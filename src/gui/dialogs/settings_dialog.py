@@ -4,6 +4,12 @@ Settings dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.config import (
+    DEFAULT_WEATHER_INTERVAL_MINUTES,
+    MAX_WEATHER_INTERVAL_MINUTES,
+    MIN_WEATHER_INTERVAL_MINUTES,
+)
+
 
 class SettingsDialog(wx.Dialog):
     """
@@ -18,6 +24,7 @@ class SettingsDialog(wx.Dialog):
         simbrief_userid="",
         auto_check_updates=True,
         auto_tune_com1=True,
+        weather_update_interval=DEFAULT_WEATHER_INTERVAL_MINUTES,
     ):
         """
         Initialize the settings dialog.
@@ -28,6 +35,8 @@ class SettingsDialog(wx.Dialog):
             hoppie_logon_code (str): The current Hoppie logon code to display
             simbrief_userid (str): The current SimBrief User ID to display
             auto_check_updates (bool): Whether to automatically check for updates
+            auto_tune_com1 (bool): Whether to auto-tune COM1 standby
+            weather_update_interval (int): Minutes between automatic weather checks
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Settings", size=(-1, -1))
 
@@ -122,6 +131,31 @@ class SettingsDialog(wx.Dialog):
         )
         vbox.Add(auto_tune_help_text, 0, wx.ALL, 5)
 
+        # Add a separator
+        vbox.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.ALL, 5)
+
+        # Automatic weather update interval
+        weather_interval_label = wx.StaticText(
+            self, label="Automatic weather update interval (minutes):"
+        )
+        vbox.Add(weather_interval_label, 0, wx.ALL, 5)
+        self.weather_interval_spin = wx.SpinCtrl(
+            self,
+            min=MIN_WEATHER_INTERVAL_MINUTES,
+            max=MAX_WEATHER_INTERVAL_MINUTES,
+            initial=weather_update_interval,
+        )
+        self.weather_interval_spin.SetName("Automatic weather update interval in minutes")
+        vbox.Add(self.weather_interval_spin, 0, wx.ALL, 5)
+
+        weather_interval_help_text = wx.StaticText(
+            self,
+            label="How often reports you have asked to keep updated are requested\n"
+            "again. Shorter intervals put more load on the ACARS network, so\n"
+            "only lower this if you are watching an ATIS that changes often.",
+        )
+        vbox.Add(weather_interval_help_text, 0, wx.ALL, 5)
+
         # Buttons
         hbox = wx.BoxSizer(wx.HORIZONTAL)
         self.ok_button = wx.Button(self, wx.ID_OK, label="Save")
@@ -139,7 +173,8 @@ class SettingsDialog(wx.Dialog):
         Get the settings entered by the user.
 
         Returns:
-            tuple: (sayintentions_logon_code, hoppie_logon_code, simbrief_userid, auto_check_updates)
+            tuple: (sayintentions_logon_code, hoppie_logon_code, simbrief_userid,
+                   auto_check_updates, auto_tune_com1, weather_update_interval)
         """
         return (
             self.sayintentions_logon_code_text.GetValue(),
@@ -147,4 +182,5 @@ class SettingsDialog(wx.Dialog):
             self.simbrief_userid_text.GetValue(),
             self.auto_check_updates_checkbox.GetValue(),
             self.auto_tune_com1_checkbox.GetValue(),
+            self.weather_interval_spin.GetValue(),
         )

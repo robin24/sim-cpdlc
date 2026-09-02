@@ -59,3 +59,35 @@ def test_menu_shown_for_a_message_from_the_current_station(panel, logger):
     view.on_context_menu(None)
 
     assert len(panel.popped) == 1
+
+
+def test_the_weather_menu_hands_back_the_report_it_was_opened_on(panel, logger):
+    """The report text is what seeds change detection when updates are turned
+    back on, so the menu has to pass it along with the key. Without it the next
+    check treats the report already on screen as new and announces it again.
+    """
+    manager = MessageManager(logger)
+    text = "EGLL 261150Z 24010KT Q1013"
+    message_id = manager.add_weather_message(text, "EGLL", "metar")
+
+    toggled = []
+    view = MessageView(
+        panel,
+        logger,
+        manager,
+        lambda *_: None,
+        lambda: STATION,
+        on_toggle_weather_updates=lambda *args: toggled.append(args),
+        is_weather_watched=lambda *_: False,
+    )
+    panel.PopupMenu = lambda menu: [
+        panel.ProcessEvent(
+            wx.CommandEvent(wx.wxEVT_MENU, item.GetId())
+        )
+        for item in menu.GetMenuItems()
+    ]
+    view.add_message(message_id)
+    view.message_list.Select(0)
+    view.on_context_menu(None)
+
+    assert toggled == [("EGLL", "metar", text)]

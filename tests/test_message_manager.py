@@ -113,3 +113,19 @@ def test_marking_an_unknown_id_is_harmless(logger):
     manager = MessageManager(logger)
 
     manager.mark_acknowledged(4242, "WILCO")  # must not raise
+
+
+def test_a_weather_report_reaches_the_reader_without_separators(logger):
+    """Hoppie separates report lines with @, which a screen reader announces as
+    the word "at" if it is left in the text."""
+    manager = MessageManager(logger)
+    message_id = manager.add_weather_message(
+        "EGLL ATIS INFO K@RWY IN USE 27R", "EGLL", "vatatis"
+    )
+
+    _, row = manager.get_message_display_text(message_id)
+    detail = manager.get_message_detail_text(message_id)
+
+    assert "@" not in row
+    assert "@" not in detail
+    assert detail == "ATIS EGLL\n\nEGLL ATIS INFO K\nRWY IN USE 27R"
