@@ -92,13 +92,16 @@ def normalize_report(text):
 def extract_atis_letter(text, icao=None):
     """Pull the information letter out of an ATIS report.
 
-    Handles both "INFORMATION K" and "INFORMATION KILO", and airports that
-    announce as "EGLL K". Returns an empty string when no letter is found,
-    which lets the caller fall back to comparing the full text.
+    Handles both "INFORMATION K" and "INFORMATION KILO". The airport code is
+    deliberately not treated as a marker: a US D-ATIS announces itself as
+    "KSFO D ATIS ..." and the designator would be read as the letter, pinning
+    the signature to a value that never changes. Returns an empty string when
+    no letter is found, which lets the caller fall back to comparing the full
+    text.
 
     Args:
         text: The raw ATIS text.
-        icao: Optional airport ICAO code, which some ATIS use as the marker.
+        icao: Accepted for call-site compatibility and ignored.
 
     Returns:
         str: A single uppercase letter, or "" if none could be identified.
@@ -107,9 +110,7 @@ def extract_atis_letter(text, icao=None):
         return ""
 
     words = _NON_REPORT_CHARS.sub(" ", text.upper()).split()
-    markers = set(_LETTER_MARKERS)
-    if icao:
-        markers.add(icao.upper())
+    markers = _LETTER_MARKERS
 
     for index in range(len(words) - 1):
         if words[index] not in markers:
