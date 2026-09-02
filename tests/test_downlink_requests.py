@@ -30,12 +30,6 @@ def session(make_session):
     return make_session()
 
 
-def last_frame(session):
-    """The most recent frame handed to the connection, as (to, min, rr, text)."""
-    recipient, min_value, rr, message, _mrn = session.connection_manager.sent[-1]
-    return recipient, min_value, rr, message
-
-
 # --- addressing and preconditions ---------------------------------------------
 
 

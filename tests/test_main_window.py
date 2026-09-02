@@ -111,6 +111,68 @@ def test_the_requests_menu_carries_every_request(window):
     ]
 
 
+def _mnemonic(label):
+    """Return the access-key letter a wx label declares with '&', if any.
+
+    wx escapes a literal ampersand as "&&", which is not a mnemonic.
+
+    Args:
+        label: A wx item or menu label, e.g. "&Connect" or "Log&off\tCTRL+O".
+
+    Returns:
+        str: The upper-cased mnemonic letter, or None if the label declares
+            none.
+    """
+    index = 0
+    while index < len(label) - 1:
+        if label[index] == "&":
+            if label[index + 1] == "&":
+                index += 2
+                continue
+            return label[index + 1].upper()
+        index += 1
+    return None
+
+
+def _colliding_mnemonics(labels):
+    """Group labels by mnemonic letter, keeping only letters more than one claims.
+
+    Args:
+        labels: Iterable of wx item or menu labels.
+
+    Returns:
+        dict: {letter: [label, ...]} for every letter two or more labels
+            declare as their mnemonic.
+    """
+    by_letter = {}
+    for label in labels:
+        letter = _mnemonic(label)
+        if letter is not None:
+            by_letter.setdefault(letter, []).append(label)
+    return {letter: found for letter, found in by_letter.items() if len(found) > 1}
+
+
+def test_no_mnemonic_collides_within_a_menu_or_the_menu_bar(window):
+    """GetItemLabelText() strips '&', so it cannot see two items fighting over
+    the same access key - one of them silently loses single-key keyboard
+    access, which is exactly the kind of thing an NVDA user relies on.
+    """
+    menu_bar = window.GetMenuBar()
+
+    for menu_index in range(menu_bar.GetMenuCount()):
+        menu = menu_bar.GetMenu(menu_index)
+        labels = [item.GetItemLabel() for item in menu.GetMenuItems()]
+        collisions = _colliding_mnemonics(labels)
+        title = menu_bar.GetMenuLabel(menu_index)
+        assert collisions == {}, f"{title!r} menu: colliding mnemonic(s) {collisions}"
+
+    top_level_labels = [
+        menu_bar.GetMenuLabel(index) for index in range(menu_bar.GetMenuCount())
+    ]
+    collisions = _colliding_mnemonics(top_level_labels)
+    assert collisions == {}, f"Menu bar: colliding mnemonic(s) {collisions}"
+
+
 def test_every_menu_item_has_a_handler(window):
     missing = [
         name for name in MENU_HANDLERS if not callable(getattr(window, name, None))

@@ -5,6 +5,7 @@ sends malformed text to a controller.
 """
 
 import pytest
+import wx
 
 from src.gui.dialogs import WeatherDialog
 
@@ -22,6 +23,19 @@ def dialog(frame):
     yield build
     for instance in built:
         instance.Destroy()
+
+
+def _fire_auto_update_toggle(weather):
+    """Tick or untick the auto-update box the way a user actually does.
+
+    Calling on_auto_update_toggled() directly would keep passing even if
+    the Bind() that wires it to the checkbox were deleted, silently
+    bringing back the reverting-tick bug the handler exists to prevent.
+    """
+    checkbox = weather.auto_update_checkbox
+    event = wx.CommandEvent(wx.EVT_CHECKBOX.typeId, checkbox.GetId())
+    event.SetEventObject(checkbox)
+    checkbox.GetEventHandler().ProcessEvent(event)
 
 
 # --- weather ------------------------------------------------------------------
@@ -52,7 +66,7 @@ def test_ticking_survives_a_correction_to_the_icao(dialog):
 
     weather.icao_text.SetValue("EGKK")
     weather.auto_update_checkbox.SetValue(True)
-    weather.on_auto_update_toggled(None)
+    _fire_auto_update_toggle(weather)
     weather.icao_text.SetValue("EGLL")
 
     assert weather.get_weather_details() == ("EGLL", "metar", True)
@@ -60,7 +74,7 @@ def test_ticking_survives_a_correction_to_the_icao(dialog):
 
 def test_unticking_survives_a_correction_to_the_icao(dialog):
     """Unticking is how updates are stopped, so it has to stick too."""
-    watched = {("EGLL", "metar")}
+    watched = {("EGLL", "metar"), ("EGKK", "metar")}
     weather = dialog(
         WeatherDialog, "metar", is_watched=lambda icao, kind: (icao, kind) in watched
     )
@@ -69,7 +83,7 @@ def test_unticking_survives_a_correction_to_the_icao(dialog):
     assert weather.auto_update_checkbox.GetValue() is True
 
     weather.auto_update_checkbox.SetValue(False)
-    weather.on_auto_update_toggled(None)
-    weather.icao_text.SetValue("EGLL")
+    _fire_auto_update_toggle(weather)
+    weather.icao_text.SetValue("EGKK")
 
-    assert weather.get_weather_details() == ("EGLL", "metar", False)
+    assert weather.get_weather_details() == ("EGKK", "metar", False)

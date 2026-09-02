@@ -116,6 +116,7 @@ def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
         poller.on_poll_timer(None)
 
     assert poller.is_running() is True
+    assert connection.polls == 1
 
 
 class IdleConnection:
