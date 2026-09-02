@@ -116,3 +116,38 @@ def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
         poller.on_poll_timer(None)
 
     assert poller.is_running() is True
+
+
+class IdleConnection:
+    """Connected, with nothing to report."""
+
+    def is_connected(self):
+        return True
+
+
+def test_repeated_activity_does_not_defer_a_pending_poll(logger, frame):
+    """Answering uplinks faster than the active interval used to restart the
+    countdown every time, so the poll that would fetch the reply never ran."""
+    poller = PollingController(logger, IdleConnection(), None)
+    poller.start(frame)
+
+    poller.set_active_polling()
+    deadline = poller._next_poll_at
+
+    for _ in range(5):
+        poller.set_active_polling()
+
+    assert poller._next_poll_at == deadline
+
+
+def test_an_idle_poll_is_pulled_forward_to_the_active_rate(logger, frame):
+    """The point of active mode is a faster reply, so a poll a minute away has
+    to come forward when the pilot sends something."""
+    poller = PollingController(logger, IdleConnection(), None)
+    poller.start(frame)
+    idle_deadline = poller._next_poll_at
+
+    poller.set_active_polling()
+
+    assert poller._next_poll_at < idle_deadline
+    assert poller.poll_timer.GetInterval() == poller.active_poll_interval

@@ -58,6 +58,11 @@ class PollingController:
         )
         self.last_activity_time = 0
         self.poll_timer = None
+        # When the pending one-shot is due, as time.monotonic(). wx.Timer
+        # cannot report how much of a one-shot interval remains, so
+        # set_active_polling() needs this to tell a poll that is already
+        # imminent from one that is a minute off.
+        self._next_poll_at = None
         self._active_mode = False
         self._stopped = True
         self.parent_window = None
@@ -104,6 +109,7 @@ class PollingController:
     def stop(self):
         """Stop the polling timer."""
         self._stopped = True
+        self._next_poll_at = None
         if self.poll_timer and self.poll_timer.IsRunning():
             self.poll_timer.Stop()
             self.logger.info("Stopped polling timer")
@@ -122,6 +128,7 @@ class PollingController:
             return
 
         interval = self.next_interval()
+        self._next_poll_at = time.monotonic() + interval / 1000
         self.poll_timer.StartOnce(interval)
         self.logger.debug(f"Next poll in {interval}ms")
 
@@ -215,8 +222,14 @@ class PollingController:
                 f"Switching to active polling interval: {self.active_poll_interval}ms"
             )
 
-        # Bring the next poll forward if it is further off than the active rate.
-        if self.poll_timer and not self._stopped and self.poll_timer.IsRunning():
+        # Bring the next poll forward if it is further off than the active
+        # rate, and otherwise leave it alone. Restarting unconditionally would
+        # push a poll that is nearly due out to a fresh active interval, so a
+        # pilot acting faster than that interval would never get one at all.
+        if not self.is_running() or self._next_poll_at is None:
+            return
+
+        if self._next_poll_at - time.monotonic() > self.active_poll_interval / 1000:
             self.poll_timer.Stop()
             self._schedule_next()
 
