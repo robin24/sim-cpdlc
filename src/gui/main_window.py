@@ -14,12 +14,9 @@ from hoppie_connector import (
 )
 
 from src.config import (
-    SAYINTENTIONS_API_URL,
-    HOPPIE_API_URL,
     DEFAULT_POLL_INTERVAL,
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
-    MAX_CONNECTION_FAILURES,
     MESSAGE_SOUND_FILENAME,
     DEFAULT_WEATHER_INTERVAL_MINUTES,
     load_config,
@@ -147,6 +144,7 @@ class MainWindow(wx.Frame):
             self.logger,
             self.message_manager,
             self._on_acknowledge_message,
+            self.cpdlc_session.get_current_station,
             self._on_toggle_weather_updates,
             self._is_weather_watched,
         )
@@ -1105,10 +1103,13 @@ class MainWindow(wx.Frame):
                 if msg_text == "LOGON ACCEPTED":
                     # Handle automatic handovers or explicit logon acceptance
                     mrn = message.get_mrn() if hasattr(message, "get_mrn") else None
-                    self.cpdlc_session.handle_logon_accepted(sender, mrn=mrn)
-                    # Update UI
-                    self.SetStatusText(f"Logged on to {sender}.")
-                    self.logger.info(f"Logon accepted by {sender}")
+                    # Only report the logon if the session actually accepted it;
+                    # a stale acceptance from a previously contacted station is
+                    # ignored and must not be announced as success.
+                    if self.cpdlc_session.handle_logon_accepted(sender, mrn=mrn):
+                        # Update UI
+                        self.SetStatusText(f"Logged on to {sender}.")
+                        self.logger.info(f"Logon accepted by {sender}")
 
                 # Check for HANDOVER message from current station
                 elif sender == self.cpdlc_session.get_current_station():
@@ -1172,24 +1173,28 @@ class MainWindow(wx.Frame):
                                     f"Auto-tune failed \u2014 set {freq:.3f} manually"
                                 )
 
-    def _on_acknowledge_message(self, message, response):
+    def _on_acknowledge_message(self, message_id: int, response: str):
         """Handle message acknowledgement.
 
         Args:
-            message: The message being acknowledged
+            message_id: The ID of the message being acknowledged
             response: The response text
         """
-        sender = message.get_from_name()
-        min_value = message.get_min()
+        addressing = self.message_manager.get_cpdlc_addressing(message_id)
+        if addressing is None:
+            self.logger.warning(f"Cannot acknowledge unknown message ID {message_id}")
+            self.SetStatusText("Could not send response: message unavailable.")
+            return
+
+        sender, min_value = addressing
 
         success, returned_message = self.cpdlc_session.send_acknowledgement(
             sender, min_value, response
         )
         if success:
-            # STANDBY sends the response but does NOT mark as acknowledged,
-            # allowing the pilot to respond again later with WILCO/UNABLE etc.
-            if response != "STANDBY":
-                self.message_manager.mark_acknowledged(message)
+            # MessageManager decides whether this response retires the message;
+            # STANDBY is sent but leaves it answerable.
+            self.message_manager.mark_acknowledged(message_id, response)
 
             # Add custom message only if a message was returned from the session
             if returned_message:

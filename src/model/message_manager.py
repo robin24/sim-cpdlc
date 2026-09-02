@@ -1,7 +1,6 @@
 """Message management for the CPDLC client."""
 
-from typing import Dict, List, Tuple, Set, Optional, Any, Callable
-import logging
+from typing import List, Tuple, Set, Optional, Any
 
 from hoppie_connector import (
     CpdlcMessage,
@@ -47,6 +46,30 @@ class WeatherReport:
         """Return the (icao, info_type) pair identifying this report."""
         return (self.icao, self.info_type)
 
+# The responses a pilot may send for each response requirement, in the order
+# they are offered in the context menu. Requirements that need no reply
+# (RR.NO, RR.NOT_REQUIRED) are absent by design.
+RESPONSES_BY_REQUIREMENT = {
+    RR.WILCO_UNABLE: ["WILCO", "UNABLE", "STANDBY"],
+    RR.AFFIRM_NEGATIVE: ["AFFIRM", "NEGATIVE", "STANDBY"],
+    RR.ROGER: ["ROGER", "STANDBY"],
+    RR.YES: ["YES", "NO"],
+}
+
+# Every response string the client can send, derived from the table above so
+# the two cannot drift. The polling controller imports this rather than
+# keeping its own copy.
+CPDLC_RESPONSES = frozenset(
+    response
+    for responses in RESPONSES_BY_REQUIREMENT.values()
+    for response in responses
+)
+
+# Responses that do NOT answer a message for good. STANDBY tells the controller
+# to wait; the pilot must still follow it with WILCO/UNABLE, so it must not
+# retire the response options.
+NON_TERMINAL_RESPONSES = frozenset({"STANDBY"})
+
 
 class MessageManager:
     """Manages CPDLC messages and their state."""
@@ -60,7 +83,15 @@ class MessageManager:
         self.logger = logger
         self.message_id_counter = 0
         self.message_log = {}  # Maps message_id to message object
-        self.acknowledged_messages = set()  # Set of (sender, message_id) tuples
+        # IDs of messages that have been answered for good. This is not "every
+        # message a response was sent for": STANDBY is transmitted but stays
+        # out of this set, so the message remains answerable.
+        #
+        # Keyed on the ID this class assigns, not on (sender, MIN): MIN is the
+        # sending station's own counter, which restarts whenever that station
+        # re-logs on, so the same pair recurs within a single flight and would
+        # suppress the response options for a later, unrelated message.
+        self.acknowledged_messages: Set[int] = set()
 
     def add_message(self, message: HoppieMessage) -> int:
         """Add a HoppieMessage to the message log.
@@ -149,6 +180,25 @@ class MessageManager:
         """
         return self.message_log.get(message_id)
 
+    def get_cpdlc_addressing(self, message_id: int) -> Optional[Tuple[str, int]]:
+        """Get the sender and MIN needed to address a reply to a message.
+
+        Saves the caller from reaching into CpdlcMessage itself, and gives it a
+        single check for "this ID cannot be replied to".
+
+        Args:
+            message_id: The message ID
+
+        Returns:
+            tuple: (sender, min_value), or None if the ID does not name a CPDLC
+                message
+        """
+        message = self.message_log.get(message_id)
+        if not isinstance(message, CpdlcMessage):
+            return None
+
+        return message.get_from_name(), message.get_min()
+
     def get_message_display_text(self, message_id: int) -> Tuple[str, str]:
         """Get formatted display text for a message.
 
@@ -213,36 +263,52 @@ class MessageManager:
         else:
             return ""
 
-    def mark_acknowledged(self, message: CpdlcMessage):
-        """Mark a message as acknowledged.
+    def mark_acknowledged(self, message_id: int, response: str):
+        """Record the response that was sent for a message.
+
+        Non-terminal responses are transmitted but leave the message
+        answerable, so they are not recorded here.
 
         Args:
-            message: The CPDLC message that was acknowledged
+            message_id: The ID of the CPDLC message that was responded to
+            response: The response text that was sent
         """
-        if not isinstance(message, CpdlcMessage):
+        if response.strip().upper() in NON_TERMINAL_RESPONSES:
+            self.logger.debug(
+                f"Response {response} does not retire message ID={message_id}"
+            )
             return
 
-        sender = message.get_from_name()
-        min_value = message.get_min()
-        message_key = (sender, min_value)
-        self.acknowledged_messages.add(message_key)
-        self.logger.debug(f"Marked message as acknowledged: {message_key}")
+        self.acknowledged_messages.add(message_id)
+        self.logger.debug(f"Marked message as acknowledged: ID={message_id}")
 
-    def needs_acknowledgement(self, message: HoppieMessage) -> Tuple[bool, List[str]]:
+    def needs_acknowledgement(
+        self, message_id: int, current_station: str
+    ) -> Tuple[bool, List[str]]:
         """Check if a message needs acknowledgement and get valid responses.
 
         Args:
-            message: The message to check
+            message_id: The ID of the message to check
+            current_station: The station currently logged on. Messages from any
+                other station are no longer part of the live dialogue and
+                cannot be answered.
 
         Returns:
             tuple: (needs_ack, responses)
         """
+        message = self.message_log.get(message_id)
+
         if isinstance(message, CpdlcMessage):
-            # Create a message identifier tuple
-            message_key = (message.get_from_name(), message.get_min())
+            sender = message.get_from_name()
+            if sender != current_station:
+                self.logger.debug(
+                    f"Message ID={message_id} is from {sender}, not the current "
+                    f"station {current_station or '(none)'}; not answerable."
+                )
+                return False, []
 
             # Check if this message has already been acknowledged
-            if message_key not in self.acknowledged_messages:
+            if message_id not in self.acknowledged_messages:
                 responses = self._get_cpdlc_responses(message)
                 if responses:
                     self.logger.debug("Message needs acknowledgement.")
@@ -258,30 +324,12 @@ class MessageManager:
             message: The CPDLC message
 
         Returns:
-            list: Valid response strings
+            list: Valid response strings, empty if the message needs no reply
         """
-        responses = []
-        rr = message.get_rr()
-        if rr == RR.W_U:
-            responses.append("WILCO")
-            responses.append("UNABLE")
-            responses.append("STANDBY")
-        elif rr == RR.A_N:
-            responses.append("AFFIRM")
-            responses.append("NEGATIVE")
-            responses.append("STANDBY")
-        elif rr == RR.R:
-            responses.append("ROGER")
-            responses.append("STANDBY")
-        elif rr == RR.YES:
-            responses.append("YES")
-            responses.append("NO")
-        elif rr == RR.NO:
-            # N means "no response required" (used on response messages)
-            return []
-        else:
+        responses = RESPONSES_BY_REQUIREMENT.get(message.get_rr())
+        if not responses:
             self.logger.debug("No responses needed.")
             return []
 
         self.logger.debug(f"Valid responses: {responses}")
-        return responses
+        return list(responses)

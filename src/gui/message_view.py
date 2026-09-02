@@ -2,7 +2,6 @@
 
 import wx
 
-from hoppie_connector import HoppieMessage, CpdlcMessage
 from src.model.message_manager import MessageManager, WeatherReport
 
 
@@ -14,7 +13,8 @@ class MessageView:
         parent,
         logger,
         message_manager: MessageManager,
-        on_acknowledge=None,
+        on_acknowledge,
+        get_current_station,
         on_toggle_weather_updates=None,
         is_weather_watched=None,
     ):
@@ -25,6 +25,8 @@ class MessageView:
             logger: Application logger
             message_manager: Message manager instance
             on_acknowledge: Callback for message acknowledgement
+            get_current_station: Callable returning the station currently
+                logged on, used to scope responses to the live dialogue
             on_toggle_weather_updates: Callback(icao, info_type) to start or
                 stop automatic updates for a weather report
             is_weather_watched: Callable(icao, info_type) returning whether a
@@ -34,6 +36,7 @@ class MessageView:
         self.logger = logger
         self.message_manager = message_manager
         self.on_acknowledge = on_acknowledge
+        self.get_current_station = get_current_station
         self.on_toggle_weather_updates = on_toggle_weather_updates
         self.is_weather_watched = is_weather_watched
 
@@ -45,7 +48,12 @@ class MessageView:
         hbox = wx.BoxSizer(wx.HORIZONTAL)
 
         # Create message list
-        self.message_list = wx.ListCtrl(self.parent, style=wx.LC_REPORT)
+        # LC_SINGLE_SEL keeps GetFirstSelected() unambiguous: with multiple
+        # rows selected it returns the lowest-indexed one, which need not be
+        # the row the user is looking at or right-clicked.
+        self.message_list = wx.ListCtrl(
+            self.parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL
+        )
         self.message_list.InsertColumn(0, "Sender", width=-1)
         self.message_list.InsertColumn(1, "Message", width=-1)
         self.message_list.SetToolTip("Messages received from the CPDLC network.")
@@ -119,12 +127,12 @@ class MessageView:
             self._show_weather_menu(message)
             return
 
-        if not isinstance(message, HoppieMessage):
-            self.logger.debug(f"Selected item (ID={message_id}) is not a HoppieMessage")
-            return
-
-        self.logger.debug(f"Checking message: {message}")
-        needs_ack, responses = self.message_manager.needs_acknowledgement(message)
+        # needs_acknowledgement resolves the ID itself and rejects anything
+        # that is not an unanswered CPDLC message from the current station.
+        self.logger.debug(f"Checking message ID={message_id}")
+        needs_ack, responses = self.message_manager.needs_acknowledgement(
+            message_id, self.get_current_station()
+        )
 
         if not needs_ack:
             self.logger.debug(
@@ -141,8 +149,8 @@ class MessageView:
             menu_items.append(menu_item)
             self.parent.Bind(
                 wx.EVT_MENU,
-                lambda event, resp=response, msg=message: self._handle_acknowledge(
-                    msg, resp
+                lambda event, resp=response, mid=message_id: self._handle_acknowledge(
+                    mid, resp
                 ),
                 menu_item,
             )
@@ -190,12 +198,12 @@ class MessageView:
         self.parent.Unbind(wx.EVT_MENU, id=menu_item.GetId())
         menu.Destroy()
 
-    def _handle_acknowledge(self, message: CpdlcMessage, response: str):
+    def _handle_acknowledge(self, message_id: int, response: str):
         """Handle acknowledgement of a message.
 
         Args:
-            message: The message to acknowledge
+            message_id: The ID of the message to acknowledge
             response: The response text
         """
         if self.on_acknowledge:
-            self.on_acknowledge(message, response)
+            self.on_acknowledge(message_id, response)

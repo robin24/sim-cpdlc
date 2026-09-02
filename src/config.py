@@ -94,8 +94,10 @@ def save_config(config):
 
 
 # API URLs
-SAYINTENTIONS_API_URL = "http://acars.sayintentions.ai/acars/system/connect.html"
-HOPPIE_API_URL = "http://www.hoppie.nl/acars/system/connect.html"
+# HTTPS is required: the logon code travels as a query parameter on every
+# request, so plain HTTP would expose it to anyone on the same network.
+SAYINTENTIONS_API_URL = "https://acars.sayintentions.ai/acars/system/connect.html"
+HOPPIE_API_URL = "https://www.hoppie.nl/acars/system/connect.html"
 
 # Polling configuration (in milliseconds).
 # Hoppie asks for a poll "once between every 45 and 75 seconds, randomly timed
@@ -115,6 +117,11 @@ MAX_CONNECTION_FAILURES = 3
 DEFAULT_WEATHER_INTERVAL_MINUTES = 5
 MIN_WEATHER_INTERVAL_MINUTES = 1
 MAX_WEATHER_INTERVAL_MINUTES = 60
+
+# Network timeout in seconds, applied to every outbound ACARS request.
+# hoppie_connector sets no timeout of its own, so without this a server that
+# accepts the connection and then stops responding would block forever.
+NETWORK_TIMEOUT = 15
 
 # Sound file path
 MESSAGE_SOUND_FILENAME = "message.wav"

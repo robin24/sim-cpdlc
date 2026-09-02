@@ -8,6 +8,7 @@ import wx
 from hoppie_connector import HoppieMessage, CpdlcMessage, TelexMessage
 from src.config import MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
 from src.model.connection_manager import ConnectionManager
+from src.model.message_manager import CPDLC_RESPONSES
 from src.utils.message_formatting import extract_message_content
 
 
@@ -59,6 +60,8 @@ class PollingController:
         self.poll_timer = None
         self._active_mode = False
         self._stopped = True
+        self.parent_window = None
+        self._reported_failure = False
 
     def next_interval(self):
         """Return the delay to wait before the next poll.
@@ -85,6 +88,7 @@ class PollingController:
         Args:
             parent_window: The parent window for the timer
         """
+        self.parent_window = parent_window
         if self.poll_timer is None:
             self.poll_timer = wx.Timer(parent_window)
             parent_window.Bind(wx.EVT_TIMER, self.on_poll_timer, self.poll_timer)
@@ -136,6 +140,10 @@ class PollingController:
             self._schedule_next()
             return
 
+        # Surface link state: a failing poll is otherwise invisible, leaving the
+        # status bar reading "Connected" through a total outage.
+        self._report_connection_state()
+
         # Process received messages
         if messages:
             self.logger.info(f"Received {len(messages)} new message(s)")
@@ -159,10 +167,36 @@ class PollingController:
             success = self.connection_manager.attempt_reconnection()
             if success:
                 self.logger.info("Reconnection successful")
+                self._set_status("Reconnected.")
             else:
                 self.logger.error("Reconnection failed")
+                self._set_status("Connection lost. Reconnect to continue.")
+                # attempt_reconnection() cleared cnx, so the next tick would
+                # stop the timer and nothing would ever restart it. Stop here
+                # and let the user reconnect deliberately.
+                self.stop()
 
+        # stop() sets _stopped, so the failure branch above still ends polling.
         self._schedule_next()
+
+    def _set_status(self, text):
+        """Show a short connection message in the parent window's status bar."""
+        if self.parent_window and hasattr(self.parent_window, "SetStatusText"):
+            self.parent_window.SetStatusText(text)
+
+    def _report_connection_state(self):
+        """Tell the user when polling starts failing, and when it recovers."""
+        failing = self.connection_manager.poll_failed()
+        if failing:
+            self._reported_failure = True
+            self._set_status(
+                f"Connection problem "
+                f"({self.connection_manager.failure_count()}/"
+                f"{self.connection_manager.max_connection_failures}) - retrying..."
+            )
+        elif self._reported_failure:
+            self._reported_failure = False
+            self._set_status("Connection restored.")
 
     def set_active_polling(self):
         """Switch to more frequent polling during active communication."""
@@ -221,20 +255,12 @@ class PollingController:
         if isinstance(message, CpdlcMessage):
             content = message.get_packet_content()
             if content:
-                # Check for common acknowledgement messages
-                ack_responses = [
-                    "WILCO",
-                    "UNABLE",
-                    "ROGER",
-                    "AFFIRM",
-                    "NEGATIVE",
-                    "YES",
-                    "NO",
-                ]
                 clean_content = extract_message_content(content)
 
-                # If the message only contains an acknowledgement, don't increase polling
-                if clean_content in ack_responses:
+                # If the message only contains an acknowledgement, don't
+                # increase polling. CPDLC_RESPONSES is shared with
+                # MessageManager so the two lists cannot drift apart.
+                if clean_content in CPDLC_RESPONSES:
                     return False
 
         # For all other message types, increase polling rate

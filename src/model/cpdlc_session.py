@@ -6,6 +6,7 @@ from typing import Optional, Callable, Tuple
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from src.model.connection_manager import ConnectionManager
+from src.utils.weather_parsing import report_type_label
 
 
 class CpdlcSession:
@@ -237,6 +238,29 @@ class CpdlcSession:
         self.cpdlc_min_counter += 1
         return True, response
 
+    def _request_info(self, icao: str, label: str, send) -> Tuple[bool, Optional[str]]:
+        """Run an information request and normalise the result.
+
+        Args:
+            icao: Airport ICAO code
+            label: Human-readable request name for log messages
+            send: Callable taking the ICAO code and returning the response text
+
+        Returns:
+            tuple: (success, text_or_error)
+        """
+        if not self.connection_manager.is_connected():
+            self.logger.warning(
+                f"{label} request attempted without active connection"
+            )
+            return False, None
+
+        try:
+            return True, send(icao)
+        except HoppieError as exc:
+            self.logger.error(f"Failed to request {label} for {icao}: {exc}")
+            return False, str(exc)
+
     def request_atis(self, icao: str) -> Tuple[bool, Optional[str]]:
         """Request ATIS information for an airport.
 
@@ -246,16 +270,9 @@ class CpdlcSession:
         Returns:
             tuple: (success, atis_text_or_error)
         """
-        if not self.connection_manager.is_connected():
-            self.logger.warning("ATIS request attempted without active connection")
-            return False, None
-
-        try:
-            atis_text = self.connection_manager.send_atis_request(icao)
-            return True, atis_text
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request ATIS for {icao}: {exc}")
-            return False, str(exc)
+        return self._request_info(
+            icao, "ATIS", self.connection_manager.send_atis_request
+        )
 
     def send_direct_request(
         self, fix: str, reason: Optional[str] = None
@@ -372,16 +389,9 @@ class CpdlcSession:
         Returns:
             tuple: (success, metar_text_or_error)
         """
-        if not self.connection_manager.is_connected():
-            self.logger.warning("METAR request attempted without active connection")
-            return False, None
-
-        try:
-            metar_text = self.connection_manager.send_metar_request(icao)
-            return True, metar_text
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request METAR for {icao}: {exc}")
-            return False, str(exc)
+        return self._request_info(
+            icao, "METAR", self.connection_manager.send_metar_request
+        )
 
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.
@@ -409,19 +419,34 @@ class CpdlcSession:
 
         return True, message
 
-    def handle_logon_accepted(self, station: str, mrn: Optional[int] = None) -> None:
+    def handle_logon_accepted(self, station: str, mrn: Optional[int] = None) -> bool:
         """Handle a LOGON ACCEPTED message from a station.
 
         Args:
             station: The station that accepted the logon
             mrn: The message reference number from the LOGON ACCEPTED message
+
+        Returns:
+            bool: True if the logon was accepted, False if it was ignored
         """
         # Validate station name is exactly 4 characters
         if len(station) != 4:
             self.logger.warning(
                 f"Invalid station name in LOGON ACCEPTED: {station} (must be 4 characters)"
             )
-            return
+            return False
+
+        # Validate the sender against our pending logon request. The MRN alone
+        # cannot do this: logon() restarts cpdlc_min_counter at 1, so every
+        # pending logon carries MIN 1 and a stale acceptance from a previously
+        # contacted station would match. Only checked when a logon is pending,
+        # so unsolicited acceptances during an automatic handover still apply.
+        if self.pending_logon_station and station != self.pending_logon_station:
+            self.logger.warning(
+                f"LOGON ACCEPTED from {station} does not match pending logon station "
+                f"{self.pending_logon_station}, ignoring"
+            )
+            return False
 
         # Validate MRN matches our pending logon request
         if self.pending_logon_min is not None and mrn is not None:
@@ -429,12 +454,13 @@ class CpdlcSession:
                 self.logger.warning(
                     f"LOGON ACCEPTED MRN {mrn} does not match pending logon MIN {self.pending_logon_min}, ignoring"
                 )
-                return
+                return False
 
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
         self.pending_logon_min = None
         self.pending_logon_station = None
+        return True
 
     def handle_station_logoff(self, station: str) -> None:
         """Handle a LOGOFF message from a station.
@@ -547,15 +573,11 @@ class CpdlcSession:
         Returns:
             tuple: (success, report_text_or_error)
         """
-        if not self.connection_manager.is_connected():
-            self.logger.warning("Weather request attempted without active connection")
-            return False, None
-
-        try:
-            return True, self.connection_manager.send_info_request(info_type, icao)
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request {info_type} for {icao}: {exc}")
-            return False, str(exc)
+        return self._request_info(
+            icao,
+            report_type_label(info_type),
+            lambda code: self.connection_manager.send_info_request(info_type, code),
+        )
 
     def send_heading_request(self, degrees: str) -> Tuple[bool, Optional[str]]:
         """Send a heading request (DM70).
