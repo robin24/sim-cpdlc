@@ -468,12 +468,11 @@ class ConnectionManager:
         """
         return self.send_info_request("metar", icao)
 
-    def send_atis_request(self, icao, source="vatatis"):
+    def send_atis_request(self, icao):
         """Send an ATIS information request.
 
         Args:
             icao: Airport ICAO code
-            source: ATIS source key ("vatatis", "ivaoatis" or "peatis")
 
         Returns:
             str: The ATIS text
@@ -481,4 +480,4 @@ class ConnectionManager:
         Raises:
             HoppieError: If not connected or request fails
         """
-        return self.send_info_request(source, icao)
+        return self.send_info_request("vatatis", icao)

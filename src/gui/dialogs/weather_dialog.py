@@ -6,10 +6,9 @@ import wx
 
 from src.utils.weather_parsing import REPORT_TYPES
 
-# Order the report types are offered in, most commonly used first. Plain ATIS
-# leads because it is what most requests are for, and the IVAO and PilotEdge
-# variants trail because they only answer on those networks.
-REPORT_ORDER = ("vatatis", "metar", "taf", "shorttaf", "ivaoatis", "peatis")
+# Order the report types are offered in, most commonly used first. ATIS leads
+# because it is what most requests are for.
+REPORT_ORDER = ("vatatis", "metar", "taf", "shorttaf")
 
 AUTO_UPDATE_HELP = (
     "When ticked, the report is requested again periodically and you are\n"

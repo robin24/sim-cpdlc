@@ -8,17 +8,16 @@ REPORT_TYPES = {
     "metar": ("METAR", "metar"),
     "taf": ("TAF", "taf"),
     "shorttaf": ("Short TAF", "shorttaf"),
-    # The "vatatis" packet is what every network answers a plain ATIS request
-    # with: Hoppie serves the VATSIM ATIS, SayIntentions serves its own. Label
-    # it plainly, since the source follows whichever network you are using.
+    # The "vatatis" packet is what every supported network answers a plain
+    # ATIS request with: Hoppie serves the VATSIM ATIS, SayIntentions serves
+    # its own. Label it plainly, since the source follows whichever network
+    # you are using.
     "vatatis": ("ATIS", "vatatis"),
-    "ivaoatis": ("ATIS (IVAO)", "ivaoatis"),
-    "peatis": ("ATIS (PilotEdge)", "peatis"),
 }
 
 # Report kinds that carry an information letter we can compare instead of
 # diffing the whole text.
-ATIS_TYPES = ("vatatis", "ivaoatis", "peatis")
+ATIS_TYPES = ("vatatis",)
 
 _WHITESPACE = re.compile(r"\s+")
 _NON_REPORT_CHARS = re.compile(r"[^A-Z0-9 ]")
