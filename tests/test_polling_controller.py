@@ -151,3 +151,57 @@ def test_an_idle_poll_is_pulled_forward_to_the_active_rate(logger, frame):
 
     assert poller._next_poll_at < idle_deadline
     assert poller.poll_timer.GetInterval() == poller.active_poll_interval
+
+
+class ClearanceConnection:
+    """Connected, and hands back a clearance that should speed up polling."""
+
+    def __init__(self, message):
+        self.message = message
+
+    def is_connected(self):
+        return True
+
+    def poll(self):
+        return [self.message], None
+
+    def poll_failed(self):
+        return False
+
+    def should_attempt_reconnection(self):
+        return False
+
+
+def test_a_message_that_speeds_up_polling_mid_tick_still_schedules_once(logger, frame):
+    """set_active_polling() is also called from inside on_poll_timer itself,
+    when a message warrants faster polling. At that point the one-shot has
+    just fired and reports IsRunning() == False - the platform quirk the
+    `not self.is_running()` guard exists to handle. Without that guard, a
+    message arriving mid-tick would have set_active_polling() schedule a
+    poll of its own, and the tick's own finally block would schedule a
+    second one on top of it.
+    """
+    message = uplink("LSAG", 1, "CLIMB TO AND MAINTAIN FL360", rr=RR.WILCO_UNABLE)
+    assert controller(logger).should_increase_polling_rate(message) is True
+
+    poller = PollingController(logger, ClearanceConnection(message))
+    poller.start(frame)
+
+    schedule_calls = []
+    real_schedule_next = poller._schedule_next
+
+    def counting_schedule_next():
+        schedule_calls.append(None)
+        real_schedule_next()
+
+    poller._schedule_next = counting_schedule_next
+
+    # Simulate being inside the timer's own firing handler, where a one-shot
+    # wx.Timer reports IsRunning() == False.
+    poller.poll_timer.Stop()
+
+    poller.on_poll_timer(None)
+
+    assert len(schedule_calls) == 1
+    assert poller.is_active_mode() is True
+    assert poller.poll_timer.GetInterval() == poller.active_poll_interval
