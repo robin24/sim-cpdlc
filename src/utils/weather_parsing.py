@@ -89,6 +89,50 @@ def normalize_report(text):
     return _WHITESPACE.sub(" ", text.replace("@", " ").upper()).strip()
 
 
+def _report_lines(text):
+    """Split a report on its separators, dropping empties.
+
+    Args:
+        text: The raw report text.
+
+    Returns:
+        list: The non-empty lines, each stripped.
+    """
+    if not text or not isinstance(text, str):
+        return []
+    return [line.strip() for line in text.split("@") if line.strip()]
+
+
+def format_report_text(text):
+    """Lay a report out over lines for the detail view.
+
+    Hoppie separates the lines of an information report with "@", which a
+    screen reader announces as the word "at" if it is left in place. This is
+    deliberately not message_formatting.format_message_text: that helper maps
+    "@@" to the literal string "N/A" and strips underscores, which are CPDLC
+    packet conventions and would corrupt a weather report.
+
+    Args:
+        text: The raw report text.
+
+    Returns:
+        str: The report with separators turned into line breaks.
+    """
+    return "\n".join(_report_lines(text))
+
+
+def format_report_line(text):
+    """Flatten a report to one line for the message list.
+
+    Args:
+        text: The raw report text.
+
+    Returns:
+        str: The report on a single line, with whitespace collapsed.
+    """
+    return " ".join(" ".join(_report_lines(text)).split())
+
+
 def extract_atis_letter(text, icao=None):
     """Pull the information letter out of an ATIS report.
 

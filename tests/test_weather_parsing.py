@@ -9,6 +9,8 @@ from src.utils.weather_parsing import (
     ATIS_TYPES,
     REPORT_TYPES,
     extract_atis_letter,
+    format_report_line,
+    format_report_text,
     report_signature,
     report_type_label,
     report_type_packet,
@@ -74,3 +76,35 @@ def test_a_datis_that_advances_reads_as_a_change():
 def test_an_unreadable_letter_falls_back_to_the_whole_report():
     """Better to compare the full text than to guess at a letter."""
     assert extract_atis_letter("FRANKFURT ARRIVAL RWY 25L", "EDDF") == ""
+
+
+# --- report formatting ---------------------------------------------------------
+
+ATIS_WITH_SEPARATORS = "EGLL ATIS INFO K AT 1150Z@RWY IN USE 27R@TRL 60@@WIND 240/10"
+
+
+def test_the_detail_view_turns_separators_into_line_breaks():
+    assert format_report_text(ATIS_WITH_SEPARATORS) == (
+        "EGLL ATIS INFO K AT 1150Z\n"
+        "RWY IN USE 27R\n"
+        "TRL 60\n"
+        "WIND 240/10"
+    )
+
+
+def test_the_list_row_is_a_single_line():
+    assert format_report_line(ATIS_WITH_SEPARATORS) == (
+        "EGLL ATIS INFO K AT 1150Z RWY IN USE 27R TRL 60 WIND 240/10"
+    )
+
+
+def test_a_report_with_no_separators_is_left_alone():
+    metar = "EGLL 261150Z 24010KT 9999 FEW035 18/11 Q1013"
+
+    assert format_report_text(metar) == metar
+    assert format_report_line(metar) == metar
+
+
+def test_formatting_survives_an_empty_report():
+    assert format_report_text("") == ""
+    assert format_report_line(None) == ""

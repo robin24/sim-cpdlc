@@ -13,7 +13,11 @@ from src.utils.message_formatting import (
     format_list_text,
     format_message_text,
 )
-from src.utils.weather_parsing import report_type_label
+from src.utils.weather_parsing import (
+    format_report_line,
+    format_report_text,
+    report_type_label,
+)
 
 
 class WeatherReport:
@@ -213,7 +217,7 @@ class MessageManager:
             return "", ""
 
         if isinstance(message, WeatherReport):
-            return message.label, f"{message.icao}: {' '.join(message.text.split())}"
+            return message.label, f"{message.icao}: {format_report_line(message.text)}"
         elif isinstance(message, HoppieMessage):
             # For HoppieMessage objects
             sender = message.get_from_name()
@@ -225,8 +229,8 @@ class MessageManager:
             # For custom messages
             if ": " in message:
                 sender, text = message.split(": ", 1)
-                # Multi-line messages (oceanic requests, position reports) get
-                # flattened here; the detail view keeps the line breaks.
+                # The list row is a summary, so any line breaks are flattened
+                # here; the detail view keeps them.
                 return sender, " ".join(text.split())
             else:
                 return "SYSTEM", " ".join(message.split())
@@ -247,7 +251,7 @@ class MessageManager:
             return ""
 
         if isinstance(message, WeatherReport):
-            return f"{message.label} {message.icao}\n\n{message.text}"
+            return f"{message.label} {message.icao}\n\n{format_report_text(message.text)}"
         elif isinstance(message, HoppieMessage):
             # For HoppieMessage objects
             raw_content = message.get_packet_content()
