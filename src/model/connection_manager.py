@@ -161,17 +161,23 @@ class ConnectionManager:
         """
         if is_send:
             self.send_failures += 1
-            count = self.send_failures
-            kind = "Send failure"
+            message = (
+                f"Send failure count: {self.send_failures}/"
+                f"{self.max_connection_failures}"
+            )
         elif is_info:
             self.info_failures += 1
-            count = self.info_failures
-            kind = "Information request failure"
+            # info_failures has no cap and gates nothing, so printing it
+            # against max_connection_failures would read like a breached
+            # threshold that was never being measured.
+            message = f"Information request failure count: {self.info_failures}"
         else:
             self.connection_failures += 1
-            count = self.connection_failures
-            kind = "Connection failure"
-        self.logger.warning(f"{kind} count: {count}/{self.max_connection_failures}")
+            message = (
+                f"Connection failure count: {self.connection_failures}/"
+                f"{self.max_connection_failures}"
+            )
+        self.logger.warning(message)
         error = HoppieError(redact(exc))
         error.is_transport = True
         return error
@@ -242,6 +248,7 @@ class ConnectionManager:
         self.network_type = network_type
         self.connection_failures = 0
         self.send_failures = 0
+        self.info_failures = 0
         self.logger.info(
             f"Successfully connected as {callsign} to {network_type} network"
         )
@@ -260,6 +267,7 @@ class ConnectionManager:
         self.network_type = None
         self.connection_failures = 0
         self.send_failures = 0
+        self.info_failures = 0
         self.logger.info("Successfully disconnected")
 
     def poll(self):
@@ -333,6 +341,7 @@ class ConnectionManager:
             # Reset connection failures counter
             self.connection_failures = 0
             self.send_failures = 0
+            self.info_failures = 0
             self.logger.info(f"Reconnection successful for {self.callsign}")
             return True
         except HoppieError as exc:

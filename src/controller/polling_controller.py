@@ -161,7 +161,15 @@ class PollingController:
                 for message in messages:
                     self.logger.info(f"Received message: {message}")
                     if self.message_callback:
-                        self.message_callback(message)
+                        try:
+                            self.message_callback(message)
+                        except Exception:
+                            # app.spec builds with console=False, so without
+                            # this the traceback reaches neither the log file
+                            # nor the pilot - the message just vanishes. Still
+                            # re-raised: it must not be swallowed here.
+                            self.logger.exception("Error in message callback")
+                            raise
 
                     # Check if this message should trigger faster polling
                     if self.should_increase_polling_rate(message):

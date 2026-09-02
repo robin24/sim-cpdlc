@@ -1,5 +1,7 @@
 """Tests for polling-rate decisions."""
 
+import logging
+
 import pytest
 
 from conftest import FakeConnectionManager, uplink
@@ -117,6 +119,31 @@ def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
 
     assert poller.is_running() is True
     assert connection.polls == 1
+
+
+def test_a_dropped_message_is_logged_before_it_propagates(logger, frame, caplog):
+    """app.spec builds with console=False, so the log file is the only place
+    a callback failure can ever surface. Without a log record here, the pilot
+    just loses the message with no evidence anywhere it arrived.
+    """
+    # The shared `logger` fixture disables propagation so tests stay silent;
+    # caplog listens on the root logger by default, so its handler has to be
+    # attached here directly to see records from this logger at all.
+    connection = RaisingConnection()
+
+    def explode(_message):
+        raise RuntimeError("SimConnect went away")
+
+    poller = PollingController(logger, connection, explode)
+    poller.start(frame)
+    poller.poll_timer.Stop()
+
+    with caplog.at_level(logging.ERROR, logger=logger.name):
+        logger.addHandler(caplog.handler)
+        with pytest.raises(RuntimeError):
+            poller.on_poll_timer(None)
+
+    assert "SimConnect went away" in caplog.text
 
 
 class IdleConnection:
