@@ -142,7 +142,15 @@ The suite must stay green and must lose only the tests for deleted behaviour.
   cases; keep the weather dialog cases.
 - `tests/test_main_window.py` — drop the removed handlers from `MENU_HANDLERS`
   and update the menu-structure assertions to the single `Requests` menu.
-- `tests/test_weather_monitor.py` — unchanged, plus new cases for fixes 3 and 5.
+- `tests/test_weather_monitor.py` — unchanged. Its `EGLL ATIS INFORMATION K`
+  fixtures match on a word marker, so fix 3 does not disturb them.
+- `tests/test_weather_parsing.py` — new, for the report registry, the ATIS
+  letter and the report formatters.
+
+New cases go next to the unit they cover rather than all into
+`test_weather_monitor.py`: fixes 3 and 4 in `test_weather_parsing.py`, fix 5 in
+`test_dialogs.py`, fixes 1 and 2 in `test_polling_controller.py`, and fix 6 in
+`test_connection_manager.py`.
 
 New tests, one per fix, each failing before its change:
 
