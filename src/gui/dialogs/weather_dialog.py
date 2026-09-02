@@ -23,13 +23,12 @@ class WeatherDialog(wx.Dialog):
     keeping it up to date automatically.
     """
 
-    def __init__(self, parent, default_type="vatatis", is_watched=None):
+    def __init__(self, parent, is_watched=None):
         """
         Initialize the weather information dialog.
 
         Args:
             parent: The parent window
-            default_type: Report type key to preselect
             is_watched: Callable(icao, info_type) returning whether that report
                 is already being kept up to date. Until the user operates the
                 checkbox themselves, it mirrors this: the box always shows the
@@ -55,10 +54,10 @@ class WeatherDialog(wx.Dialog):
             self, choices=[REPORT_TYPES[key][0] for key in REPORT_ORDER]
         )
         self.type_choice.SetName("Report type")
-        if default_type in REPORT_ORDER:
-            self.type_choice.SetSelection(REPORT_ORDER.index(default_type))
-        else:
-            self.type_choice.SetSelection(0)
+        # ATIS leads REPORT_ORDER, and the dialog always starts there: the type
+        # is deliberately not remembered between requests, so a one-off METAR
+        # does not move where every later request begins.
+        self.type_choice.SetSelection(0)
         vbox.Add(self.type_choice, 0, wx.ALL | wx.EXPAND, 5)
 
         icao_label = wx.StaticText(self, label="Airport &ICAO code:")

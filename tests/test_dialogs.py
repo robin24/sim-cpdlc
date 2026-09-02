@@ -42,7 +42,7 @@ def _fire_auto_update_toggle(weather):
 
 
 def test_a_weather_request_needs_a_full_icao_code(dialog):
-    weather = dialog(WeatherDialog, "metar")
+    weather = dialog(WeatherDialog)
 
     weather.icao_text.SetValue("egl")
     assert weather.ok_button.IsEnabled() is False
@@ -52,31 +52,31 @@ def test_a_weather_request_needs_a_full_icao_code(dialog):
 
 
 def test_a_weather_request_reports_the_code_in_upper_case(dialog):
-    weather = dialog(WeatherDialog, "metar")
+    weather = dialog(WeatherDialog)
 
     weather.icao_text.SetValue("egll")
 
-    assert weather.get_weather_details() == ("EGLL", "metar", False)
+    assert weather.get_weather_details() == ("EGLL", "vatatis", False)
 
 
 def test_checking_survives_a_correction_to_the_icao(dialog):
     """The check was silently reverted by the next keystroke, so a typo fixed
     after checking meant no subscription and nothing said about it."""
-    weather = dialog(WeatherDialog, "metar", is_watched=lambda icao, kind: False)
+    weather = dialog(WeatherDialog, is_watched=lambda icao, kind: False)
 
     weather.icao_text.SetValue("EGKK")
     weather.auto_update_checkbox.SetValue(True)
     _fire_auto_update_toggle(weather)
     weather.icao_text.SetValue("EGLL")
 
-    assert weather.get_weather_details() == ("EGLL", "metar", True)
+    assert weather.get_weather_details() == ("EGLL", "vatatis", True)
 
 
 def test_unchecking_survives_a_correction_to_the_icao(dialog):
     """Unchecking is how updates are stopped, so it has to stick too."""
-    watched = {("EGLL", "metar"), ("EGKK", "metar")}
+    watched = {("EGLL", "vatatis"), ("EGKK", "vatatis")}
     weather = dialog(
-        WeatherDialog, "metar", is_watched=lambda icao, kind: (icao, kind) in watched
+        WeatherDialog, is_watched=lambda icao, kind: (icao, kind) in watched
     )
 
     weather.icao_text.SetValue("EGLL")
@@ -86,4 +86,4 @@ def test_unchecking_survives_a_correction_to_the_icao(dialog):
     _fire_auto_update_toggle(weather)
     weather.icao_text.SetValue("EGKK")
 
-    assert weather.get_weather_details() == ("EGKK", "metar", False)
+    assert weather.get_weather_details() == ("EGKK", "vatatis", False)

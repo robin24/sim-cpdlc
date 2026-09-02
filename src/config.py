@@ -35,7 +35,6 @@ DEFAULT_CONFIG = {
     "auto_check_updates": True,  # Enable automatic update checks by default
     "auto_tune_com1": True,  # Auto-tune COM1 standby on CONTACT/MONITOR messages
     "weather_update_interval": 5,  # Minutes between automatic weather re-checks
-    "weather_report_type": "vatatis",  # Report type preselected in the weather dialog
 }
 
 

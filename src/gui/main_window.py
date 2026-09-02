@@ -719,20 +719,10 @@ class MainWindow(wx.Frame):
 
         self.logger.debug("Opening weather information request dialog")
 
-        config = load_config()
-        dlg = WeatherDialog(
-            self,
-            config.get("weather_report_type", "vatatis"),
-            is_watched=self._is_weather_watched,
-        )
+        dlg = WeatherDialog(self, is_watched=self._is_weather_watched)
 
         if dlg.ShowModal() == wx.ID_OK:
             icao, info_type, auto_update = dlg.get_weather_details()
-
-            # Remember the report type so the next request opens on it.
-            if config.get("weather_report_type") != info_type:
-                config["weather_report_type"] = info_type
-                save_config(config)
 
             label = report_type_label(info_type)
             was_watched = self.weather_monitor.is_subscribed(icao, info_type)

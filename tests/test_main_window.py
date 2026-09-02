@@ -10,6 +10,7 @@ stripped-down frame; this builds the whole window.
 """
 
 import pytest
+import wx
 
 import src.gui.main_window as mw
 from src.config import DEFAULT_CONFIG
@@ -259,8 +260,8 @@ def test_the_context_menu_toggle_stops_and_restarts_updates(window):
 def test_the_checkbox_mirrors_the_live_subscription_state(window):
     """Opening the dialog always unchecked would misreport what is happening,
     so it has to follow the airport as it is typed."""
-    window.weather_monitor.subscribe("EGLL", "metar")
-    dialog = WeatherDialog(window, "metar", is_watched=window._is_weather_watched)
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+    dialog = WeatherDialog(window, is_watched=window._is_weather_watched)
 
     try:
         dialog.icao_text.SetValue("EGLL")
@@ -326,3 +327,51 @@ def test_re_enabling_updates_does_not_repeat_the_report_on_screen(window):
     window.weather_monitor._on_result("EGLL", "metar", text, None)
 
     assert window.message_view.message_list.GetItemCount() == before
+
+
+# --- the report type is not remembered ----------------------------------------
+
+
+def test_the_weather_dialog_always_opens_on_atis(window):
+    """ATIS is what most requests are for, and the last type used is not
+    carried over, so the dialog starts there every time."""
+    dialog = WeatherDialog(window, is_watched=window._is_weather_watched)
+
+    try:
+        assert dialog.get_weather_details()[1] == "vatatis"
+    finally:
+        dialog.Destroy()
+
+
+def test_requesting_weather_does_not_remember_the_report_type(window, monkeypatch):
+    """Nothing about the request is written to the config file. Persisting the
+    type made a one-off METAR change where every later request started."""
+
+    class StubDialog:
+        """Stands in for the modal dialog, answering with a METAR request."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def ShowModal(self):
+            return wx.ID_OK
+
+        def get_weather_details(self):
+            return "EGLL", "metar", False
+
+        def Destroy(self):
+            pass
+
+    saved = []
+    monkeypatch.setattr(mw, "save_config", lambda config: saved.append(config))
+    monkeypatch.setattr(mw, "WeatherDialog", StubDialog)
+    monkeypatch.setattr(window, "_require_connection", lambda action: True)
+    monkeypatch.setattr(
+        window.cpdlc_session,
+        "request_weather",
+        lambda info_type, icao: (True, "EGLL 261150Z 24010KT Q1013"),
+    )
+
+    window.on_weather_request(None)
+
+    assert saved == []
