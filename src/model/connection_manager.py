@@ -475,31 +475,3 @@ class ConnectionManager:
             raise HoppieError(f"No {label} available for {icao}")
 
         return report_text
-
-    def send_metar_request(self, icao):
-        """Send a METAR information request.
-
-        Args:
-            icao: Airport ICAO code
-
-        Returns:
-            str: The METAR text
-
-        Raises:
-            HoppieError: If not connected or request fails
-        """
-        return self.send_info_request("metar", icao)
-
-    def send_atis_request(self, icao):
-        """Send an ATIS information request.
-
-        Args:
-            icao: Airport ICAO code
-
-        Returns:
-            str: The ATIS text
-
-        Raises:
-            HoppieError: If not connected or request fails
-        """
-        return self.send_info_request("vatatis", icao)
