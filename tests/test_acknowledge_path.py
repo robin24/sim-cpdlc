@@ -132,3 +132,19 @@ def test_a_retry_is_dropped_when_the_message_was_answered_in_the_meantime(logger
 
     assert [frame[3] for frame in connection.sent] == ["UNABLE"]
     assert window.status_texts[-1] == "Delayed WILCO not sent: the message was already answered."
+
+
+def test_a_retry_after_a_disconnect_sends_nothing_and_shows_no_dialog(logger, message_boxes):
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+    window._on_acknowledge_message(message_id, "WILCO")
+    _, callback, args = window.retries[0]
+
+    connection.disconnect()
+    connection.raise_with = None
+    callback(*args)
+
+    assert connection.sent == []
+    assert message_boxes.calls == []
+    assert window.status_texts[-1] == "Delayed WILCO not sent: not connected."

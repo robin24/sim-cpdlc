@@ -207,6 +207,18 @@ def test_connect_rejects_a_callsign_the_library_cannot_send_with(logger, monkeyp
     assert cm.is_connected() is False
 
 
+def test_connect_reports_a_local_fault_through_the_same_error(logger, monkeypatch):
+    """A missing CA bundle in a packaged build is not a link problem, but the
+    Connect dialog is still where the pilot needs to read it."""
+    serving(monkeypatch, raises=FileNotFoundError(2, "No such file", "cacert.pem"))
+    cm = ConnectionManager(logger)
+
+    with pytest.raises(HoppieError, match="cacert.pem"):
+        cm.connect("DLH123", LOGON, "hoppie")
+
+    assert cm.is_connected() is False
+
+
 # --- poll results -------------------------------------------------------------
 
 

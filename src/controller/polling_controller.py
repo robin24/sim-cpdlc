@@ -45,8 +45,8 @@ class PollingController:
             logger: Application logger
             connection_manager: Connection manager instance
             message_callback: Callback for received messages
-            default_poll_interval: Nominal idle interval in milliseconds, used
-                only when a jitter range is not available
+            default_poll_interval: Accepted for call-site compatibility; the
+                idle interval always comes from poll_interval_range
             active_poll_interval: Interval used while a reply is expected
             inactivity_timeout: How long to stay in the faster mode after the
                 last activity, in milliseconds
@@ -154,7 +154,7 @@ class PollingController:
     def on_poll_timer(self, event):
         """Handle poll timer event."""
         if not self.connection_manager.is_connected():
-            self.logger.warning("Connection lost, stopping poll timer")
+            self.logger.warning("Not connected; stopping poll timer")
             self.stop()
             return
 
@@ -165,8 +165,15 @@ class PollingController:
         # branch below still ends polling deliberately.
         try:
             result = self.connection_manager.poll()
-            self.link.record_poll(result)
-            self._show_link_status()
+            link_error = None
+            try:
+                self.link.record_poll(result)
+                self._show_link_status()
+            except Exception as exc:
+                # The link callback reaches into the window. A failure there
+                # must not cost the batch the server has already handed over.
+                self.logger.exception("Error in link callback")
+                link_error = exc
 
             if self.link.state == LinkState.FATAL:
                 # The server rejected the logon code. The link callback has
@@ -176,6 +183,8 @@ class PollingController:
 
             self._deliver(result)
             self.check_polling_timeout()
+            if link_error is not None:
+                raise link_error
         finally:
             self._schedule_next()
 
@@ -226,7 +235,11 @@ class PollingController:
             self.parent_window.SetStatusText(text)
 
     def _on_link_change(self, old_state, new_state, reason):
-        """React to a link transition: the status bar first, then the window."""
+        """React to a link transition: the restore text, then the window.
+
+        The degraded and lost texts are refreshed by _show_link_status after
+        every poll.
+        """
         if new_state == LinkState.CONNECTED and old_state != LinkState.CONNECTED:
             self._set_status("Connection restored.")
         if self.link_callback:

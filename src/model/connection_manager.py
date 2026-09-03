@@ -169,13 +169,12 @@ class ConnectionManager:
         self.logon_code = ""
         self.network_type = None
         self.connection_failures = 0
-        # Send failures are tracked separately: a successful poll must not
-        # clear them, or a link that passes GETs but blocks POSTs would never
-        # accumulate enough failures to trigger a reconnection.
+        # Send failures are counted apart from polls, so a successful poll
+        # does not hide a link that blocks POSTs while still answering GETs.
         self.send_failures = 0
         # Information requests run on the weather monitor's worker thread and
         # are auxiliary to the CPDLC link, so their failures are counted apart
-        # from the ones that decide a reconnection is due.
+        # and gate nothing.
         self.info_failures = 0
         self.max_connection_failures = MAX_CONNECTION_FAILURES
         self.message_callback = message_callback
@@ -226,10 +225,7 @@ class ConnectionManager:
         """
         if is_send:
             self.send_failures += 1
-            message = (
-                f"Send failure count: {self.send_failures}/"
-                f"{self.max_connection_failures}"
-            )
+            message = f"Send failure count: {self.send_failures}"
         elif is_info:
             self.info_failures += 1
             # info_failures has no cap and gates nothing, so printing it
@@ -307,6 +303,12 @@ class ConnectionManager:
         except HoppieError:
             self.cnx = None
             raise
+        except Exception as exc:
+            # A local fault (a missing CA bundle, a broken install) is not a
+            # link problem, but the Connect dialog is still the place to show it.
+            self.cnx = None
+            self.logger.error(f"Connection failed: {redact(exc)}")
+            raise HoppieError(redact(exc)) from None
 
         self.callsign = callsign
         self.logon_code = logon_code
@@ -352,6 +354,9 @@ class ConnectionManager:
 
         try:
             self.logger.debug("Polling for new messages")
+            # Process-wide while it lasts: the weather worker never goes
+            # through hoppie_connector, so its warnings cannot be mistaken for
+            # dropped uplinks here.
             with warnings.catch_warnings(record=True) as caught:
                 # "always": the default filter shows a repeated warning once
                 # per call site, which would hide the second dropped message.

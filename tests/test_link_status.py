@@ -34,6 +34,7 @@ def test_a_lost_link_gets_a_row_and_the_chime(logger):
 
     assert rows(manager) == [("SYSTEM", "Connection lost, retrying")]
     assert window.new_message_sound.played == 1
+    assert window.weather_monitor.stopped is True
 
 
 def test_a_link_restored_after_a_loss_gets_a_row_and_the_chime(logger):
@@ -43,6 +44,7 @@ def test_a_link_restored_after_a_loss_gets_a_row_and_the_chime(logger):
 
     assert rows(manager) == [("SYSTEM", "Connection restored")]
     assert window.new_message_sound.played == 1
+    assert window.weather_monitor.started is True
 
 
 def test_a_brief_blip_only_touches_the_status_bar(logger):
@@ -96,3 +98,27 @@ def test_unreadable_uplinks_become_rows_with_the_chime(logger):
         ("SYSTEM", "Unreadable message from EDGG: /data2/6//R/QNH 1013 / TRL 70")
     ]
     assert window.new_message_sound.played == 1
+
+
+def test_a_fatal_teardown_cancels_a_pending_retry(logger):
+    window, _, _, manager = build(logger)
+    window._retry_later(5000, window._on_acknowledge_message, 1, "WILCO", True)
+    handle = window._pending_retry
+
+    window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
+
+    assert handle.stopped is True
+    assert window._pending_retry is None
+
+
+def test_a_callsign_clash_is_named_once_even_when_it_is_not_the_first_failure(logger):
+    window, _, _, manager = build(logger)
+
+    window._on_link_change(LinkState.CONNECTED, LinkState.DEGRADED, "timed out")
+    window._on_link_change(LinkState.DEGRADED, LinkState.LOST, "callsign already in use")
+    window._on_link_change(LinkState.LOST, LinkState.CONNECTED, None)
+    window._on_link_change(LinkState.CONNECTED, LinkState.DEGRADED, "callsign already in use")
+
+    texts = [text for _, text in rows(manager)]
+    assert texts.count("Connection problem: callsign already in use") == 2
+    assert texts[0] == "Connection lost, retrying"

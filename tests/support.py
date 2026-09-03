@@ -133,6 +133,10 @@ class FakeWeatherMonitor:
     def __init__(self):
         self.stopped = False
         self.cleared = False
+        self.started = False
+
+    def start(self, parent_window):
+        self.started = True
 
     def stop(self):
         self.stopped = True
@@ -164,6 +168,16 @@ class FakeSound:
     def Play(self, flags=0):
         self.played += 1
         return True
+
+
+class FakeCallLater:
+    """Stands in for a wx.CallLater handle, recording whether it was cancelled."""
+
+    def __init__(self):
+        self.stopped = False
+
+    def Stop(self):
+        self.stopped = True
 
 
 class MessageBoxes:
@@ -254,9 +268,14 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window._defer = lambda callback, *args, **kwargs: callback(*args, **kwargs)
     # wx.CallLater needs a running wx.App; record delayed callbacks instead.
     window.retries = []
-    window._retry_later = lambda delay_ms, callback, *args: window.retries.append(
-        (delay_ms, callback, args)
-    )
+    window._pending_retry = None
+
+    def _retry_later(delay_ms, callback, *args):
+        window.retries.append((delay_ms, callback, args))
+        window._pending_retry = FakeCallLater()
+
+    window._retry_later = _retry_later
+    window._callsign_clash_announced = False
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.

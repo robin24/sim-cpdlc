@@ -115,6 +115,11 @@ class MainWindow(wx.Frame):
             link_callback=self._on_link_change,
             unreadable_callback=self._on_unreadable_messages,
         )
+        # Handle of a scheduled acknowledgement retry, so a disconnect or a
+        # fatal teardown can cancel it before it fires against a dead link.
+        self._pending_retry = None
+        # Named once per episode; reset to False whenever the link recovers.
+        self._callsign_clash_announced = False
 
         # Initialize automatic weather updates
         interval_minutes = weather_interval_minutes(config)
@@ -378,6 +383,7 @@ class MainWindow(wx.Frame):
             return
 
         self.logger.info("Disconnecting from CPDLC network")
+        self._cancel_pending_retry()
 
         # If logged on to a station, send logoff message first
         if self.cpdlc_session.is_logged_on():
@@ -809,7 +815,13 @@ class MainWindow(wx.Frame):
 
     def _retry_later(self, delay_ms, callback, *args):
         """Run a callback once after a delay, on the event loop."""
-        wx.CallLater(delay_ms, callback, *args)
+        self._pending_retry = wx.CallLater(delay_ms, callback, *args)
+
+    def _cancel_pending_retry(self):
+        """Drop a scheduled acknowledgement retry; the link it needed is gone."""
+        if self._pending_retry is not None:
+            self._pending_retry.Stop()
+            self._pending_retry = None
 
     def _on_link_change(self, old_state, new_state, reason):
         """Announce the link transitions the status bar alone would hide.
@@ -818,23 +830,42 @@ class MainWindow(wx.Frame):
         link, getting it back and a rejected logon code each get a SYSTEM row
         and the notification sound. A degraded link (one or two failed polls)
         only changes the status bar, except that a callsign already in use is
-        named once so the pilot can look for the other client.
+        named once per episode so the pilot can look for the other client.
 
         Args:
             old_state: The LinkState before the transition
             new_state: The LinkState after it
             reason: The poll's reason text, None on recovery
         """
+        if new_state == LinkState.CONNECTED:
+            # The episode is over either way; the next clash, if any, is a
+            # new one and deserves its own row.
+            self._callsign_clash_announced = False
+
         if new_state == LinkState.LOST:
+            # Automatic weather updates are a re-request on a timer, and every
+            # failed attempt spends part of their five-strikes budget. A link
+            # that is already down must not also burn through that budget.
+            self.weather_monitor.stop()
             self._add_custom_message("Connection lost, retrying", "SYSTEM", play_sound=True)
         elif new_state == LinkState.CONNECTED and old_state == LinkState.LOST:
+            self.weather_monitor.start(self)
             self._add_custom_message("Connection restored", "SYSTEM", play_sound=True)
-        elif new_state == LinkState.DEGRADED and reason and "callsign already in use" in reason.lower():
+        elif new_state == LinkState.FATAL:
+            self._on_fatal_link_error(reason)
+
+        if (
+            new_state in (LinkState.DEGRADED, LinkState.LOST)
+            and reason
+            and "callsign already in use" in reason.lower()
+            and not self._callsign_clash_announced
+        ):
+            # In addition to the LOST row above, not instead of it: a clash
+            # can be the very reason the link went down.
+            self._callsign_clash_announced = True
             self._add_custom_message(
                 "Connection problem: callsign already in use", "SYSTEM"
             )
-        elif new_state == LinkState.FATAL:
-            self._on_fatal_link_error(reason)
 
     def _on_fatal_link_error(self, reason):
         """Tear the connection down after the server rejected the logon code.
@@ -843,6 +874,7 @@ class MainWindow(wx.Frame):
             reason: The server's reason text
         """
         self.logger.error(f"Disconnecting after a fatal link error: {reason}")
+        self._cancel_pending_retry()
         self.polling_controller.stop()
         self.weather_monitor.stop()
         self.weather_monitor.clear()
@@ -1141,6 +1173,11 @@ class MainWindow(wx.Frame):
             self.SetStatusText(f"Delayed {response} not sent: the message was already answered.")
             return
 
+        if retried and not self.connection_manager.is_connected():
+            self.logger.info(f"Delayed {response} for message ID {message_id} not sent: disconnected")
+            self.SetStatusText(f"Delayed {response} not sent: not connected.")
+            return
+
         success, returned_message = self.cpdlc_session.send_acknowledgement(
             sender, min_value, response
         )
@@ -1190,6 +1227,7 @@ class MainWindow(wx.Frame):
                 return
 
             self.logger.info("Exit confirmed, performing clean disconnect")
+            self._cancel_pending_retry()
 
             # If logged on to a station, send logoff message first
             if self.cpdlc_session.is_logged_on():

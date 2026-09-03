@@ -108,7 +108,7 @@ DEFAULT_POLL_INTERVAL = 60000  # 60 seconds, the average of the band above
 ACTIVE_POLL_INTERVAL = 20000  # 20 seconds, the fastest rate Hoppie permits
 INACTIVITY_TIMEOUT = 300000  # 5 minutes
 
-# Maximum connection failures before attempting reconnection
+# Consecutive failed polls before the link counts as lost
 MAX_CONNECTION_FAILURES = 3
 
 # Once the link is lost (MAX_CONNECTION_FAILURES consecutive failed polls) the

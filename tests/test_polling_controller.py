@@ -391,3 +391,34 @@ def test_start_forgets_the_previous_sessions_link_state(logger, frame):
 
     assert poller.link.state == LinkState.CONNECTED
     assert 45000 <= poller.poll_timer.GetInterval() <= 75000
+
+
+def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
+    """The link callback reaches into the window; a failure there must not
+    cost the messages the server has already marked relayed."""
+    # A bare wx.Frame has no status bar; the restore transition below reaches
+    # _set_status(), which would otherwise raise wxAssertionError.
+    frame.SetStatusText = lambda text: None
+    delivered = []
+
+    def link_callback(old, new, reason):
+        # Only the restore transition is under test here; raising
+        # unconditionally would also blow up the arrange step below, which
+        # goes through the very same (unwrapped) LinkState.record_poll().
+        if new == LinkState.CONNECTED:
+            raise RuntimeError("list control gone")
+
+    poller = PollingController(
+        logger,
+        ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"])),
+        delivered.append,
+        link_callback=link_callback,
+    )
+    poller.start(frame)
+    poller.link.record_poll(failed(3))  # already lost, so the clean poll is a transition
+
+    with pytest.raises(RuntimeError, match="list control gone"):
+        tick(poller)
+
+    assert delivered == ["CLEARANCE"]
+    assert poller.is_running() is True
