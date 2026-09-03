@@ -13,6 +13,7 @@ import pytest
 import requests
 import wx
 
+from tests.support import MessageBoxes
 from src import config as config_module
 
 
@@ -76,22 +77,6 @@ def no_simbrief(monkeypatch):
     monkeypatch.setattr("src.gui.dialogs.connect_dialog.get_latest_ofp", fake)
     monkeypatch.setattr("src.gui.dialogs.pdc_dialog.get_latest_ofp", fake)
     return asked
-
-
-class MessageBoxes:
-    """Records wx.MessageBox calls and answers them without showing anything."""
-
-    def __init__(self):
-        self.calls = []
-        self.answer = wx.YES
-
-    def __call__(self, message, caption="Message", style=wx.OK, *args, **kwargs):
-        self.calls.append((message, caption, style))
-        return self.answer
-
-    @property
-    def captions(self):
-        return [caption for _, caption, _ in self.calls]
 
 
 @pytest.fixture(autouse=True)

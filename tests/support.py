@@ -4,6 +4,8 @@ These are helpers, not fixtures: import them explicitly with
 `from tests.support import ...`. Fixtures live in conftest.py.
 """
 
+import wx
+
 from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
 
 from src.config import DEFAULT_CONFIG, save_config
@@ -106,6 +108,22 @@ class FakeSimConnectManager:
     def set_com1_standby_mhz(self, frequency_mhz):
         self.tuned.append(frequency_mhz)
         return self.result
+
+
+class MessageBoxes:
+    """Records wx.MessageBox calls and answers them without showing anything."""
+
+    def __init__(self):
+        self.calls = []
+        self.answer = wx.YES
+
+    def __call__(self, message, caption="Message", style=wx.OK, *args, **kwargs):
+        self.calls.append((message, caption, style))
+        return self.answer
+
+    @property
+    def captions(self):
+        return [caption for _, caption, _ in self.calls]
 
 
 def make_main_window(logger, cpdlc_session, message_manager, config=None, simconnect=None):
