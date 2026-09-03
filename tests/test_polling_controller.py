@@ -8,6 +8,8 @@ from tests.support import FakeConnectionManager, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.controller.polling_controller import PollingController
+from src.model.connection_manager import PollResult, UnreadableMessage
+from src.controller.link_state import LinkState
 from src.model.message_manager import CPDLC_RESPONSES
 
 
@@ -93,13 +95,7 @@ class RaisingConnection:
 
     def poll(self):
         self.polls += 1
-        return ["UPLINK"], None
-
-    def poll_failed(self):
-        return False
-
-    def should_attempt_reconnection(self):
-        return False
+        return PollResult(ok=True, messages=["UPLINK"])
 
 
 def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
@@ -191,13 +187,7 @@ class ClearanceConnection:
         return True
 
     def poll(self):
-        return [self.message], None
-
-    def poll_failed(self):
-        return False
-
-    def should_attempt_reconnection(self):
-        return False
+        return PollResult(ok=True, messages=[self.message])
 
 
 def test_a_message_that_speeds_up_polling_mid_tick_still_schedules_once(logger, frame):
@@ -233,3 +223,202 @@ def test_a_message_that_speeds_up_polling_mid_tick_still_schedules_once(logger, 
     assert len(schedule_calls) == 1
     assert poller.is_active_mode() is True
     assert poller.poll_timer.GetInterval() == poller.active_poll_interval
+
+
+# --- link state and back-off --------------------------------------------------
+
+
+class ScriptedConnection:
+    """Connected; serves a scripted sequence of poll results, then clean polls."""
+
+    def __init__(self, *results):
+        self.results = list(results)
+        self.polls = 0
+
+    def is_connected(self):
+        return True
+
+    def poll(self):
+        self.polls += 1
+        return self.results.pop(0) if self.results else PollResult(ok=True)
+
+
+def failed(count, reason="timed out", fatal=False):
+    return PollResult(ok=False, reason=reason, fatal=fatal, failures=count)
+
+
+def tick(poller):
+    """Run one timer tick the way wx would: the one-shot has already stopped."""
+    poller.poll_timer.Stop()
+    poller.on_poll_timer(None)
+
+
+def test_three_failed_polls_lose_the_link_and_start_the_back_off_ladder(logger, frame):
+    """The Jul 17 outage in the maintainer's log lasted six minutes and cleared
+    by itself; the old controller would have stopped polling after two."""
+    statuses = []
+    frame.SetStatusText = statuses.append
+    transitions = []
+    poller = PollingController(
+        logger,
+        ScriptedConnection(*[failed(count) for count in range(1, 8)]),
+        link_callback=lambda old, new, reason: transitions.append((old, new)),
+    )
+    poller.start(frame)
+
+    intervals = []
+    for _ in range(7):
+        tick(poller)
+        intervals.append(poller.poll_timer.GetInterval())
+
+    assert all(45000 <= interval <= 75000 for interval in intervals[:2])
+    assert intervals[2:] == [20000, 60000, 120000, 300000, 300000]
+    assert transitions == [
+        (LinkState.CONNECTED, LinkState.DEGRADED),
+        (LinkState.DEGRADED, LinkState.LOST),
+    ]
+    assert statuses[:3] == [
+        "Connection problem (1/3) - retrying...",
+        "Connection problem (2/3) - retrying...",
+        "Connection lost - retrying in 20 s",
+    ]
+    assert statuses[-1] == "Connection lost - retrying in 300 s"
+    assert poller.is_running() is True
+
+
+def test_a_successful_poll_restores_a_lost_link(logger, frame):
+    statuses = []
+    frame.SetStatusText = statuses.append
+    transitions = []
+    poller = PollingController(
+        logger,
+        ScriptedConnection(failed(1), failed(2), failed(3)),
+        link_callback=lambda old, new, reason: transitions.append((old, new)),
+    )
+    poller.start(frame)
+
+    for _ in range(4):
+        tick(poller)
+
+    assert transitions[-1] == (LinkState.LOST, LinkState.CONNECTED)
+    assert statuses[-1] == "Connection restored."
+    assert 45000 <= poller.poll_timer.GetInterval() <= 75000
+    assert poller.is_running() is True
+
+
+def test_a_rejected_logon_code_stops_polling_for_good(logger, frame):
+    transitions = []
+    poller = PollingController(
+        logger,
+        ScriptedConnection(failed(1, "invalid logon code", fatal=True)),
+        link_callback=lambda old, new, reason: transitions.append((old, new, reason)),
+    )
+    poller.start(frame)
+
+    tick(poller)
+
+    assert transitions == [(LinkState.CONNECTED, LinkState.FATAL, "invalid logon code")]
+    assert poller.is_running() is False
+
+
+def test_activity_does_not_shorten_the_back_off_while_the_link_is_lost(logger, frame):
+    """Restarting the pending poll would push it back by a whole rung: with
+    250 s of a 300 s wait elapsed, a send would make it 300 s again."""
+    # A bare wx.Frame has no status bar; the DEGRADED/LOST ticks below reach
+    # _set_status(), which would otherwise raise wxAssertionError.
+    frame.SetStatusText = lambda text: None
+    poller = PollingController(
+        logger, ScriptedConnection(*[failed(count) for count in range(1, 6)])
+    )
+    poller.start(frame)
+    for _ in range(5):
+        tick(poller)
+    deadline = poller._next_poll_at
+    assert poller.poll_timer.GetInterval() == 120000
+
+    poller.set_active_polling()
+
+    assert poller._next_poll_at == deadline
+
+
+def test_a_failing_callback_does_not_lose_the_rest_of_the_batch(logger, frame):
+    """The server has already marked the whole batch relayed."""
+    delivered = []
+
+    def callback(message):
+        delivered.append(message)
+        if message == "FIRST":
+            raise RuntimeError("boom")
+
+    poller = PollingController(
+        logger, ScriptedConnection(PollResult(ok=True, messages=["FIRST", "SECOND"])), callback
+    )
+    poller.start(frame)
+
+    with pytest.raises(RuntimeError):
+        tick(poller)
+
+    assert delivered == ["FIRST", "SECOND"]
+    assert poller.is_running() is True
+
+
+def test_unreadable_uplinks_reach_their_own_callback(logger, frame):
+    unreadable = [UnreadableMessage("EDGG", "/data2/6//R/QNH 1013 / TRL 70")]
+    received = []
+    poller = PollingController(
+        logger,
+        ScriptedConnection(PollResult(ok=True, unreadable=unreadable)),
+        unreadable_callback=received.extend,
+    )
+    poller.start(frame)
+
+    tick(poller)
+
+    assert received == unreadable
+
+
+def test_start_forgets_the_previous_sessions_link_state(logger, frame):
+    # A bare wx.Frame has no status bar; the DEGRADED/LOST ticks below reach
+    # _set_status(), which would otherwise raise wxAssertionError.
+    frame.SetStatusText = lambda text: None
+    poller = PollingController(logger, ScriptedConnection(failed(1), failed(2), failed(3)))
+    poller.start(frame)
+    for _ in range(3):
+        tick(poller)
+    poller.stop()
+
+    poller.start(frame)
+
+    assert poller.link.state == LinkState.CONNECTED
+    assert 45000 <= poller.poll_timer.GetInterval() <= 75000
+
+
+def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
+    """The link callback reaches into the window; a failure there must not
+    cost the messages the server has already marked relayed."""
+    # A bare wx.Frame has no status bar; the restore transition below reaches
+    # _set_status(), which would otherwise raise wxAssertionError.
+    frame.SetStatusText = lambda text: None
+    delivered = []
+
+    def link_callback(old, new, reason):
+        # Only the restore transition is under test here; raising
+        # unconditionally would also blow up the arrange step below, which
+        # goes through the very same (unwrapped) LinkState.record_poll().
+        if new == LinkState.CONNECTED:
+            raise RuntimeError("list control gone")
+
+    poller = PollingController(
+        logger,
+        ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"])),
+        delivered.append,
+        link_callback=link_callback,
+    )
+    poller.start(frame)
+    poller.link.record_poll(failed(3))  # already lost, so the clean poll is a transition
+
+    with pytest.raises(RuntimeError, match="list control gone"):
+        tick(poller)
+
+    assert delivered == ["CLEARANCE"]
+    assert poller.is_running() is True

@@ -1,6 +1,6 @@
 """End-to-end tests for the acknowledgement path through MainWindow."""
 
-from hoppie_connector import CpdlcResponseRequirement as RR
+from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from tests.support import FakeConnectionManager, make_main_window, uplink
 
@@ -10,8 +10,8 @@ from src.model.message_manager import MessageManager
 STATION = "LSAG"
 
 
-def build(logger):
-    connection = FakeConnectionManager()
+def build(logger, connection=None):
+    connection = connection if connection is not None else FakeConnectionManager()
     session = CpdlcSession(logger, connection)
     session.set_callsign("DLH123")
     session.handle_logon_accepted(STATION)
@@ -81,3 +81,70 @@ def test_a_custom_message_id_sends_nothing_and_does_not_raise(logger):
     window._on_acknowledge_message(message_id, "WILCO")
 
     assert connection.sent == []
+
+
+def test_a_rate_limited_acknowledgement_is_retried_once_after_five_seconds(logger):
+    """SayIntentions answers rate_limit to a second message within a few
+    seconds of the first; the log shows a ROGER lost that way."""
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+
+    window._on_acknowledge_message(message_id, "WILCO")
+
+    assert connection.sent == []
+    assert window.status_texts[-1] == "Rate limited - retrying WILCO in 5 s"
+    assert manager.needs_acknowledgement(message_id, STATION)[0] is True
+    delay, callback, args = window.retries[0]
+    assert (delay, args) == (5000, (message_id, "WILCO", True))
+
+    connection.raise_with = None
+    callback(*args)
+
+    assert connection.sent[-1][3] == "WILCO"
+    assert manager.needs_acknowledgement(message_id, STATION) == (False, [])
+
+
+def test_a_second_rate_limit_is_reported_rather_than_retried_again(logger, message_boxes):
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+
+    window._on_acknowledge_message(message_id, "WILCO", True)
+
+    assert window.retries == []
+    assert message_boxes.captions == ["Error"]
+    assert "rate_limit" in message_boxes.calls[0][0]
+
+
+def test_a_retry_is_dropped_when_the_message_was_answered_in_the_meantime(logger):
+    """Rate-limited WILCO, then the pilot picks UNABLE before the retry fires:
+    the stale WILCO must not follow the UNABLE onto the link."""
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+    window._on_acknowledge_message(message_id, "WILCO")
+    _, callback, args = window.retries[0]
+
+    connection.raise_with = None
+    window._on_acknowledge_message(message_id, "UNABLE")
+    callback(*args)
+
+    assert [frame[3] for frame in connection.sent] == ["UNABLE"]
+    assert window.status_texts[-1] == "Delayed WILCO not sent: the message was already answered."
+
+
+def test_a_retry_after_a_disconnect_sends_nothing_and_shows_no_dialog(logger, message_boxes):
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+    window._on_acknowledge_message(message_id, "WILCO")
+    _, callback, args = window.retries[0]
+
+    connection.disconnect()
+    connection.raise_with = None
+    callback(*args)
+
+    assert connection.sent == []
+    assert message_boxes.calls == []
+    assert window.status_texts[-1] == "Delayed WILCO not sent: not connected."

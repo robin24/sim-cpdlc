@@ -219,6 +219,15 @@ def test_the_real_window_never_reaches_the_simulator(window):
     assert isinstance(window.simconnect_manager, FakeSimConnectManager)
 
 
+def test_the_real_window_listens_to_its_polling_controller(window):
+    """The link and unreadable callbacks are how a lost link and a dropped
+    uplink reach the message list at all."""
+    controller = window.polling_controller
+
+    assert controller.link_callback == window._on_link_change
+    assert controller.unreadable_callback == window._on_unreadable_messages
+
+
 # --- the message list ---------------------------------------------------------
 
 

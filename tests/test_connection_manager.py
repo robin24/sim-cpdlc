@@ -19,8 +19,11 @@ from hoppie_connector import CpdlcResponseRequirement as RR, HoppieConnector, Ho
 from src.config import HOPPIE_API_URL, SAYINTENTIONS_API_URL
 from src.model.connection_manager import (
     ConnectionManager,
+    PollResult,
+    UnreadableMessage,
     install_request_timeout,
     redact,
+    unreadable_from_warning,
 )
 
 LOGON = "SUPERSECRET123"
@@ -170,7 +173,7 @@ def test_both_api_urls_use_https():
     assert SAYINTENTIONS_API_URL.startswith("https://")
 
 
-# --- connect and reconnect actually verify the link ---------------------------
+# --- connect actually verifies the link ---------------------------------------
 
 
 def test_connect_succeeds_against_a_healthy_server(logger, monkeypatch):
@@ -204,74 +207,153 @@ def test_connect_rejects_a_callsign_the_library_cannot_send_with(logger, monkeyp
     assert cm.is_connected() is False
 
 
-def test_reconnection_reports_failure_when_the_server_is_still_down(
-    logger, monkeypatch
-):
-    """Rebuilding the connector alone always 'succeeded', so a dead link
-    produced an endless cycle of false 'Reconnection successful' log lines."""
-    cm = connected(logger, monkeypatch)
-    serving(monkeypatch, "", status_code=502)
+def test_connect_reports_a_local_fault_through_the_same_error(logger, monkeypatch):
+    """A missing CA bundle in a packaged build is not a link problem, but the
+    Connect dialog is still where the pilot needs to read it."""
+    serving(monkeypatch, raises=FileNotFoundError(2, "No such file", "cacert.pem"))
+    cm = ConnectionManager(logger)
 
-    assert cm.attempt_reconnection() is False
+    with pytest.raises(HoppieError, match="cacert.pem"):
+        cm.connect("DLH123", LOGON, "hoppie")
+
     assert cm.is_connected() is False
 
 
-def test_reconnection_succeeds_once_the_server_recovers(logger, monkeypatch):
+# --- poll results -------------------------------------------------------------
+
+
+def test_a_clean_poll_returns_its_messages(logger, monkeypatch):
     cm = connected(logger, monkeypatch)
-    cm.connection_failures = 3
+    serving(monkeypatch, "ok {EDUU cpdlc {/data2/5//WU/CLIMB TO FL350}}")
 
-    assert cm.attempt_reconnection() is True
-    assert cm.connection_failures == 0
+    result = cm.poll()
+
+    assert result.ok is True
+    assert [message.get_message() for message in result.messages] == ["CLIMB TO FL350"]
+    assert (result.unreadable, result.failures, result.fatal, result.reason) == ([], 0, False, None)
 
 
-# --- failure counting drives reconnection -------------------------------------
+def test_an_unparseable_uplink_is_reported_not_dropped(logger, monkeypatch):
+    """hoppie_connector downgrades a message it cannot parse to a warning and
+    drops it, after the server has already marked it delivered. The pilot has
+    to be told something arrived."""
+    cm = connected(logger, monkeypatch)
+    serving(
+        monkeypatch,
+        "ok {EDUU cpdlc {/data2/5//WU/CLIMB TO FL350}}"
+        " {EDUU cpdlc {/data2/6//R/QNH 1013 / TRL 70}}",
+    )
+
+    result = cm.poll()
+
+    assert [message.get_message() for message in result.messages] == ["CLIMB TO FL350"]
+    assert result.unreadable == [UnreadableMessage("EDUU", "/data2/6//R/QNH 1013 / TRL 70")]
 
 
-def test_transport_failures_during_polling_reach_the_threshold(logger, monkeypatch):
+def test_the_same_unreadable_shape_is_reported_every_time(logger, monkeypatch):
+    """Python's default warning filter shows a repeated warning once per call
+    site, which would make the second dropped message vanish again."""
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, "ok {EDUU cpdlc {/data2/6//R/QNH 1013 / TRL 70}}")
+
+    cm.poll()
+
+    assert len(cm.poll().unreadable) == 1
+
+
+def test_a_rejected_logon_code_is_fatal(logger, monkeypatch):
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, "error {invalid logon code}")
+
+    result = cm.poll()
+
+    assert (result.ok, result.fatal) == (False, True)
+    assert "invalid logon code" in result.reason
+
+
+def test_a_callsign_already_in_use_is_a_failure_with_its_reason(logger, monkeypatch):
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, "error {callsign already in use}")
+
+    result = cm.poll()
+
+    assert (result.ok, result.fatal, result.failures) == (False, False, 1)
+    assert result.reason == "callsign already in use"
+
+
+def test_polling_while_disconnected_counts_nothing(logger):
+    cm = ConnectionManager(logger)
+
+    result = cm.poll()
+
+    assert (result.ok, result.reason, result.failures) == (False, "Not connected", 0)
+
+
+def test_unreadable_from_warning_parses_the_library_text():
+    text = (
+        "Unable to parse {'from': 'EDUU', 'type': 'cpdlc', "
+        "'packet': '/data2/6//R/QNH 1013 / TRL 70'}: Invalid CPDLC message format"
+    )
+
+    assert unreadable_from_warning(text) == UnreadableMessage(
+        "EDUU", "/data2/6//R/QNH 1013 / TRL 70"
+    )
+
+
+def test_unreadable_from_warning_keeps_unexpected_text_whole():
+    assert unreadable_from_warning("something else") == UnreadableMessage("?", "something else")
+
+
+# --- failure counting ---------------------------------------------------------
+
+
+def test_transport_failures_during_polling_are_counted(logger, monkeypatch):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "", status_code=502)
 
     for _ in range(cm.max_connection_failures):
-        cm.poll()
+        result = cm.poll()
 
-    assert cm.should_attempt_reconnection() is True
+    assert cm.connection_failures == cm.max_connection_failures
+    assert result.failures == cm.max_connection_failures
 
 
 def test_an_unparseable_poll_response_also_counts(logger, monkeypatch):
     """This failure is not a transport error, so _call does not count it. If
-    poll() did not count it either, the reconnection logic would never run and
-    the client would poll a dead endpoint forever."""
+    poll() did not count it either, a captive portal would look like a healthy
+    link forever."""
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "<html>Login required</html>")
 
     for _ in range(cm.max_connection_failures):
         cm.poll()
 
-    assert cm.should_attempt_reconnection() is True
+    assert cm.connection_failures == cm.max_connection_failures
 
 
 def test_poll_reports_failure_without_raising(logger, monkeypatch):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "", status_code=502)
 
-    assert cm.poll() == (None, None)
-    assert cm.poll_failed() is True
+    result = cm.poll()
+
+    assert (result.ok, result.failures) == (False, 1)
 
 
-def test_a_successful_poll_clears_the_failure_state(logger, monkeypatch):
+def test_a_successful_poll_clears_the_failure_count(logger, monkeypatch):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "", status_code=502)
     cm.poll()
 
     serving(monkeypatch, "ok")
-    cm.poll()
+    result = cm.poll()
 
-    assert cm.poll_failed() is False
+    assert (result.ok, result.failures, cm.connection_failures) == (True, 0, 0)
 
 
 def test_send_failures_survive_a_successful_poll(logger, monkeypatch):
-    """Proxies routinely pass GETs and block POSTs. Polls kept resetting the
-    shared counter, so a link that could not send anything never reconnected."""
+    """Proxies routinely pass GETs and block POSTs. Polls once reset the
+    shared counter, so a link that could not send anything looked healthy."""
     cm = connected(logger, monkeypatch)
 
     for _ in range(cm.max_connection_failures):
@@ -281,7 +363,7 @@ def test_send_failures_survive_a_successful_poll(logger, monkeypatch):
         monkeypatch.setattr(requests, "get", responder("ok"))
         cm.poll()
 
-    assert cm.should_attempt_reconnection() is True
+    assert cm.send_failures == cm.max_connection_failures
 
 
 def test_a_rejected_message_is_not_counted_as_a_link_failure(logger, monkeypatch):
@@ -292,7 +374,6 @@ def test_a_rejected_message_is_not_counted_as_a_link_failure(logger, monkeypatch
         cm.send_telex("EDDF", "A" * 221)
 
     assert cm.send_failures == 0
-    assert cm.should_attempt_reconnection() is False
 
 
 def test_an_acknowledgement_is_transmitted_as_data2_min_mrn_n_text(logger, monkeypatch):
@@ -327,17 +408,7 @@ def test_disconnect_clears_everything_connect_set(logger, monkeypatch):
     assert cm.callsign == ""
     assert cm.logon_code == ""
     assert cm.network_type is None
-    assert cm.should_attempt_reconnection() is False
-
-
-def test_no_reconnection_without_a_live_connection(logger):
-    """should_attempt_reconnection() guarded on the credentials alone, which
-    outlive a disconnect."""
-    cm = ConnectionManager(logger)
-    cm.callsign, cm.logon_code = "DLH123", LOGON
-    cm.connection_failures = 99
-
-    assert cm.should_attempt_reconnection() is False
+    assert cm.connection_failures == 0
 
 
 def test_api_url_follows_the_selected_network(logger):
@@ -361,12 +432,31 @@ def test_an_information_request_unwraps_the_server_envelope(
 
 
 @pytest.mark.parametrize("kind", ["metar", "vatatis"])
-def test_an_information_request_reports_a_server_error(logger, monkeypatch, kind):
+def test_an_information_request_reports_a_server_error_without_the_braces(
+    logger, monkeypatch, kind
+):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "error {invalid logon}")
 
-    with pytest.raises(HoppieError):
+    with pytest.raises(HoppieError, match=r"request error: invalid logon$"):
         cm.send_info_request(kind, "EDDF")
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["ok", "ok ", "ok {server info {}}", "ok {server info { }}"],
+    ids=["bare-ok", "ok-with-space", "empty-envelope", "blank-envelope"],
+)
+def test_a_station_with_nothing_to_report_is_reported_as_unavailable(
+    logger, monkeypatch, body
+):
+    """The empty envelope used to be returned as the literal text
+    "{server info {}}", which the weather monitor then announced as a report."""
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, body)
+
+    with pytest.raises(HoppieError, match="No METAR available for EDDF"):
+        cm.send_info_request("metar", "EDDF")
 
 
 def test_an_information_request_sends_a_timeout(logger, monkeypatch):
@@ -403,9 +493,7 @@ def test_a_failing_weather_request_does_not_trip_reconnection(logger, monkeypatc
             cm.send_info_request("metar", icao)
 
     assert cm.info_failures == 3
-    assert cm.failure_count() == 0
-    assert cm.poll_failed() is False
-    assert cm.should_attempt_reconnection() is False
+    assert (cm.connection_failures, cm.send_failures) == (0, 0)
 
 
 def test_a_weather_request_that_recovers_clears_its_own_count(logger, monkeypatch):

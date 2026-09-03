@@ -9,6 +9,7 @@ import wx
 from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
 
 from src.config import DEFAULT_CONFIG, save_config
+from src.model.connection_manager import PollResult
 
 CLIENT_CALLSIGN = "DLH123"
 
@@ -47,9 +48,15 @@ class FakeConnectionManager:
         self.sent = []
         self.telexes = []
         self.info_requests = []
+        self.poll_results = []
+        self.disconnected = False
 
     def is_connected(self):
         return self._connected
+
+    def disconnect(self):
+        self._connected = False
+        self.disconnected = True
 
     def send_cpdlc(self, recipient, min_value, response_type, message, mrn=None):
         if self.raise_with is not None:
@@ -67,6 +74,12 @@ class FakeConnectionManager:
         self.info_requests.append((info_type, icao))
         return f"{icao} REPORT FOR {info_type}"
 
+    def poll(self):
+        """Serve the next scripted PollResult, or a clean empty poll."""
+        if self.poll_results:
+            return self.poll_results.pop(0)
+        return PollResult(ok=True)
+
 
 class RecordingMessageView:
     """Captures the message IDs the window pushes into the list view."""
@@ -79,13 +92,17 @@ class RecordingMessageView:
 
 
 class FakePollingController:
-    """Records polling-rate changes without owning a wx.Timer."""
+    """Records polling-rate changes and stops without owning a wx.Timer."""
 
     def __init__(self):
         self.active_calls = 0
+        self.stopped = False
 
     def set_active_polling(self):
         self.active_calls += 1
+
+    def stop(self):
+        self.stopped = True
 
 
 class FakeSimConnectManager:
@@ -108,6 +125,59 @@ class FakeSimConnectManager:
     def set_com1_standby_mhz(self, frequency_mhz):
         self.tuned.append(frequency_mhz)
         return self.result
+
+
+class FakeWeatherMonitor:
+    """Records the lifecycle calls the window makes on the weather monitor."""
+
+    def __init__(self):
+        self.stopped = False
+        self.cleared = False
+        self.started = False
+
+    def start(self, parent_window):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def clear(self):
+        self.cleared = True
+
+
+class FakeMenuItem:
+    """Records the label and help text the window sets on a menu item."""
+
+    def __init__(self, label="&Disconnect"):
+        self.label = label
+        self.help = ""
+
+    def SetItemLabel(self, label):
+        self.label = label
+
+    def SetHelp(self, text):
+        self.help = text
+
+
+class FakeSound:
+    """Counts the notification chimes instead of playing them."""
+
+    def __init__(self):
+        self.played = 0
+
+    def Play(self, flags=0):
+        self.played += 1
+        return True
+
+
+class FakeCallLater:
+    """Stands in for a wx.CallLater handle, recording whether it was cancelled."""
+
+    def __init__(self):
+        self.stopped = False
+
+    def Stop(self):
+        self.stopped = True
 
 
 class MessageBoxes:
@@ -172,6 +242,9 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
             window's own load_config() calls see them. None leaves the
             defaults in place.
         simconnect: A FakeSimConnectManager; a fresh one when None
+
+    The window's deferred and delayed callbacks (`_defer`, `_retry_later`) run
+    or are recorded synchronously, since there is no event loop.
     """
     from src.gui.main_window import MainWindow
 
@@ -183,11 +256,26 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.cpdlc_session = cpdlc_session
     window.message_manager = message_manager
     window.message_view = RecordingMessageView()
+    window.connection_manager = cpdlc_session.connection_manager
     window.polling_controller = FakePollingController()
+    window.weather_monitor = FakeWeatherMonitor()
+    window.menu_item_connect = FakeMenuItem()
     window.simconnect_manager = (
         simconnect if simconnect is not None else FakeSimConnectManager()
     )
-    window.new_message_sound = None
+    window.new_message_sound = FakeSound()
+    # wx.CallAfter needs a running wx.App; run deferred callbacks at once.
+    window._defer = lambda callback, *args, **kwargs: callback(*args, **kwargs)
+    # wx.CallLater needs a running wx.App; record delayed callbacks instead.
+    window.retries = []
+    window._pending_retry = None
+
+    def _retry_later(delay_ms, callback, *args):
+        window.retries.append((delay_ms, callback, args))
+        window._pending_retry = FakeCallLater()
+
+    window._retry_later = _retry_later
+    window._callsign_clash_announced = False
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.
