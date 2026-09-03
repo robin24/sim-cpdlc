@@ -1,6 +1,6 @@
 """Message management for the CPDLC client."""
 
-from typing import List, Tuple, Set, Optional, Any
+from typing import Callable, List, Tuple, Set, Optional, Any
 
 from hoppie_connector import (
     CpdlcMessage,
@@ -299,15 +299,16 @@ class MessageManager:
         return message_id in self.acknowledged_messages
 
     def needs_acknowledgement(
-        self, message_id: int, current_station: str
+        self, message_id: int, is_answerable: Callable[[str], bool]
     ) -> Tuple[bool, List[str]]:
         """Check if a message needs acknowledgement and get valid responses.
 
         Args:
             message_id: The ID of the message to check
-            current_station: The station currently logged on. Messages from any
-                other station are no longer part of the live dialogue and
-                cannot be answered.
+            is_answerable: Whether a reply to a given station is still part
+                of the live dialogue. The session answers True for the
+                current station and, for a while after a handover, for the
+                station that handed the aircraft over.
 
         Returns:
             tuple: (needs_ack, responses)
@@ -316,10 +317,10 @@ class MessageManager:
 
         if isinstance(message, CpdlcMessage):
             sender = message.get_from_name()
-            if sender != current_station:
+            if not is_answerable(sender):
                 self.logger.debug(
-                    f"Message ID={message_id} is from {sender}, not the current "
-                    f"station {current_station or '(none)'}; not answerable."
+                    f"Message ID={message_id} is from {sender}, which is no "
+                    "longer part of the dialogue; not answerable."
                 )
                 return False, []
 

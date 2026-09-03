@@ -148,7 +148,7 @@ class MainWindow(wx.Frame):
             self.logger,
             self.message_manager,
             self._on_acknowledge_message,
-            self.cpdlc_session.get_current_station,
+            self.cpdlc_session.is_answerable_sender,
             self._on_toggle_weather_updates,
             self._is_weather_watched,
         )

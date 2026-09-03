@@ -30,6 +30,15 @@ def uplink(
     return CpdlcMessage(sender, CLIENT_CALLSIGN, min_value, rr, text, mrn)
 
 
+def answerable(*stations):
+    """A sender predicate that answers True for exactly these stations.
+
+    Stands in for CpdlcSession.is_answerable_sender where no session is
+    involved; answerable() with no stations means nobody is logged on.
+    """
+    return lambda sender: sender in stations
+
+
 class FakeConnectionManager:
     """Stands in for ConnectionManager, recording frames instead of transmitting.
 

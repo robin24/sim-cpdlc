@@ -9,10 +9,11 @@ here rather than at application startup.
 import pytest
 import wx
 
-from tests.support import FakeConnectionManager, uplink
+from src.config import PREVIOUS_STATION_WINDOW_SECONDS
 from src.gui.main_window import MainWindow
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
+from tests.support import FakeClock, FakeConnectionManager, uplink
 
 STATION = "LSAG"
 
@@ -28,31 +29,36 @@ class HeadlessMainWindow(MainWindow):
 
 @pytest.fixture
 def window(logger, wx_app):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = CpdlcSession(logger, FakeConnectionManager(), clock=FakeClock())
     frame = HeadlessMainWindow(logger, session, MessageManager(logger))
+    # PopupMenu runs a nested modal loop, which would hang the test; count
+    # the menus that would have been shown instead.
+    frame.panel.popped = []
+    frame.panel.PopupMenu = frame.panel.popped.append
     yield frame
     frame.Destroy()
 
 
 def test_init_ui_wires_the_message_view_to_the_live_session(window):
-    """The view must read the station from the session, not a stale copy."""
+    """The view must ask the session, not a stale copy, who can be answered."""
     window.cpdlc_session.handle_logon_accepted(STATION)
 
-    assert window.message_view.get_current_station() == STATION
+    assert window.message_view.is_answerable_sender(STATION) is True
+    assert window.message_view.is_answerable_sender("EDGG") is False
 
 
 def test_context_menu_follows_the_session_after_a_handover(window):
-    """A message from the station we have left stops offering responses."""
+    """A message from the station that handed us over keeps offering
+    responses until its window closes, then stops."""
     window.cpdlc_session.handle_logon_accepted("EDYY")
     message_id = window.message_manager.add_message(uplink("EDYY", 4))
     window.message_view.add_message(message_id)
     window.message_view.message_list.Select(0)
-    station = window.message_view.get_current_station()
+    window.cpdlc_session.handle_handover("EDYY", "EDGG")
 
-    assert window.message_manager.needs_acknowledgement(message_id, station)[0] is True
+    window.message_view.on_context_menu(None)
+    assert len(window.panel.popped) == 1
 
-    window.cpdlc_session.handle_station_logoff("EDYY")
-    window.cpdlc_session.handle_logon_accepted("EDGG")
-    station = window.message_view.get_current_station()
-
-    assert window.message_manager.needs_acknowledgement(message_id, station)[0] is False
+    window.cpdlc_session.clock.advance(PREVIOUS_STATION_WINDOW_SECONDS)
+    window.message_view.on_context_menu(None)
+    assert len(window.panel.popped) == 1
