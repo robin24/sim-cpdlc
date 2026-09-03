@@ -8,6 +8,8 @@ using while a request is out.
 import logging
 import threading
 
+import pytest
+
 from hoppie_connector import HoppieError
 
 from src.model.network_worker import (
@@ -198,6 +200,25 @@ def test_a_dispatch_failure_is_logged_and_dropped(logger, caplog):
         worker.run_pending()
 
     assert "Dropped the result of a poll job" in caplog.text
+
+
+def test_the_inline_worker_re_raises_a_callback_error_after_draining(logger):
+    """What the event loop would do with a callback that raises after
+    wx.CallAfter: the rest of the queue still runs, then the error surfaces."""
+    worker = inline_worker(logger)
+    ran = []
+
+    def explode(result):
+        raise RuntimeError("list control gone")
+
+    worker.submit("poll", lambda: 1, explode)
+    worker.submit("poll", lambda: 2, lambda result: ran.append(result.value))
+
+    with pytest.raises(RuntimeError, match="list control gone"):
+        worker.run_pending()
+
+    assert ran == [2]
+    assert worker.errors == []
 
 
 # --- shutdown -----------------------------------------------------------------

@@ -40,14 +40,38 @@ def answerable(*stations):
     return lambda sender: sender in stations
 
 
-def inline_worker(logger):
-    """A NetworkWorker with no thread.
+class InlineWorker(NetworkWorker):
+    """A NetworkWorker with no thread, for tests.
 
     Jobs run when the test calls run_pending(), on the test's own thread, and
-    each result is handed straight to its callback, so a test drives the
-    asynchronous path deterministically: submit, run_pending(), assert.
+    each result is handed straight to its callback. A callback that raises is
+    re-raised once the queue has drained: in the application wx.CallAfter
+    only schedules the callback, so its exception surfaces later in the event
+    loop rather than inside the worker, and a test must see it the same way.
     """
-    return NetworkWorker(logger, dispatch=lambda fn, *args: fn(*args), start_thread=False)
+
+    def __init__(self, logger):
+        self.errors = []
+        super().__init__(logger, dispatch=self._dispatch_inline, start_thread=False)
+
+    def _dispatch_inline(self, fn, *args):
+        try:
+            fn(*args)
+        except Exception as exc:
+            self.errors.append(exc)
+            raise
+
+    def run_pending(self):
+        super().run_pending()
+        if self.errors:
+            error = self.errors[0]
+            self.errors.clear()
+            raise error
+
+
+def inline_worker(logger):
+    """A NetworkWorker with no thread: submit, run_pending(), assert."""
+    return InlineWorker(logger)
 
 
 class FakeConnectionManager:

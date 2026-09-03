@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from tests.support import FakeConnectionManager, inline_worker, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
@@ -117,13 +119,7 @@ class RaisingConnection:
 
 def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
     """The timer is one-shot, so a tick that dies without rescheduling ends
-    polling for the session while the status bar still reads Connected.
-
-    The worker contains the callback's exception (NetworkWorker._deliver logs
-    and drops it, the same as any other on_done failure), so nothing raises
-    here any more; what still matters is that the poll ran and the timer was
-    rearmed regardless.
-    """
+    polling for the session while the status bar still reads Connected."""
     connection = RaisingConnection()
 
     def explode(_message):
@@ -133,8 +129,9 @@ def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
     poller.start(frame)
     poller.poll_timer.Stop()
 
-    poller.on_poll_timer(None)
-    worker.run_pending()
+    with pytest.raises(RuntimeError):
+        poller.on_poll_timer(None)
+        worker.run_pending()
 
     assert poller.is_running() is True
     assert connection.polls == 1
@@ -159,8 +156,9 @@ def test_a_dropped_message_is_logged_before_it_propagates(logger, frame, caplog)
 
     with caplog.at_level(logging.ERROR, logger=logger.name):
         logger.addHandler(caplog.handler)
-        poller.on_poll_timer(None)
-        worker.run_pending()
+        with pytest.raises(RuntimeError):
+            poller.on_poll_timer(None)
+            worker.run_pending()
 
     assert "SimConnect went away" in caplog.text
 
@@ -373,7 +371,8 @@ def test_a_failing_callback_does_not_lose_the_rest_of_the_batch(logger, frame):
     )
     poller.start(frame)
 
-    tick(poller, worker)
+    with pytest.raises(RuntimeError):
+        tick(poller, worker)
 
     assert delivered == ["FIRST", "SECOND"]
     assert poller.is_running() is True
@@ -410,7 +409,7 @@ def test_start_forgets_the_previous_sessions_link_state(logger, frame):
     assert 45000 <= poller.poll_timer.GetInterval() <= 75000
 
 
-def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame, caplog):
+def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
     """The link callback reaches into the window; a failure there must not
     cost the messages the server has already marked relayed."""
     # A bare wx.Frame has no status bar; the restore transition below reaches
@@ -434,11 +433,9 @@ def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame, caplog):
     poller.start(frame)
     poller.link.record_poll(failed(3))  # already lost, so the clean poll is a transition
 
-    with caplog.at_level(logging.ERROR, logger=logger.name):
-        logger.addHandler(caplog.handler)
+    with pytest.raises(RuntimeError, match="list control gone"):
         tick(poller, worker)
 
-    assert "Error in link callback" in caplog.text
     assert delivered == ["CLEARANCE"]
     assert poller.is_running() is True
 
@@ -487,7 +484,8 @@ def test_a_raising_tick_callback_still_schedules_the_next_poll(logger, frame, ca
 
     with caplog.at_level(logging.ERROR, logger=logger.name):
         logger.addHandler(caplog.handler)
-        tick(poller, worker)
+        with pytest.raises(RuntimeError, match="status bar gone"):
+            tick(poller, worker)
 
     assert "Error in tick callback" in caplog.text
     assert poller.is_running() is True
