@@ -6,6 +6,7 @@ the network.
 """
 
 import pytest
+from hoppie_connector import HoppieError
 
 from tests.support import FakeConnectionManager
 from src.model.cpdlc_elements import REASON_AIRCRAFT_PERFORMANCE, REASON_WEATHER
@@ -84,3 +85,98 @@ def test_a_weather_reason_is_unchanged(session):
     _, text = session.send_direct_request("MALOT", REASON_WEATHER)
 
     assert text == "REQUEST DIRECT TO MALOT DUE TO WEATHER"
+
+
+# --- the remaining downlinks --------------------------------------------------
+
+
+def test_a_logon_request_uses_min_one_and_expects_an_answer(make_session):
+    session = make_session(station="")
+
+    assert session.logon("EGGX") == (True, "REQUEST LOGON")
+    assert session.connection_manager.sent == [("EGGX", 1, "Y", "REQUEST LOGON", None)]
+    assert (session.pending_logon_station, session.pending_logon_min) == ("EGGX", 1)
+
+
+def test_a_logoff_needs_no_response_and_clears_the_station(session):
+    assert session.logoff() == (True, "LOGOFF")
+    assert session.connection_manager.sent == [(STATION, 1, "NE", "LOGOFF", None)]
+    assert session.get_current_station() == ""
+
+
+@pytest.mark.parametrize(
+    "speed, is_mach, reason, expected",
+    [
+        ("082", True, None, "REQUEST M082"),
+        ("300", False, None, "REQUEST 300K"),
+        ("078", True, REASON_WEATHER, "REQUEST M078 DUE TO WEATHER"),
+    ],
+    ids=["mach", "knots", "mach-with-reason"],
+)
+def test_a_speed_request_names_mach_or_knots(session, speed, is_mach, reason, expected):
+    assert session.send_speed_request(speed, is_mach, reason) == (True, expected)
+
+
+def test_a_when_can_we_expect_inquiry_is_sent_verbatim(session):
+    text = "WHEN CAN WE EXPECT HIGHER LEVEL"
+
+    assert session.send_when_can_we_expect(text) == (True, text)
+
+
+def test_every_request_goes_to_the_current_station_expecting_an_answer(session):
+    session.send_altitude_change_request("FL350")
+    session.send_direct_request("MALOT")
+    session.send_speed_request("082", True)
+    session.send_when_can_we_expect("WHEN CAN WE EXPECT LOWER LEVEL")
+
+    frames = session.connection_manager.sent
+    assert [frame[0] for frame in frames] == [STATION] * 4
+    assert [frame[2] for frame in frames] == ["Y"] * 4
+    assert [frame[1] for frame in frames] == [1, 2, 3, 4]
+
+
+def test_a_telex_goes_to_its_recipient_unchanged(session):
+    assert session.send_telex("EDDF", "HELLO THERE") == (True, "HELLO THERE")
+    assert session.connection_manager.telexes == [("EDDF", "HELLO THERE")]
+
+
+def test_a_pdc_request_is_a_telex_to_the_departure_airport(session):
+    ok, text = session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")
+
+    assert ok is True
+    assert text == "REQUEST PREDEP CLEARANCE BAW123 A339 TO LIMC AT EGLL STAND 521 ATIS K"
+    assert session.connection_manager.telexes == [("EGLL", text)]
+
+
+def test_a_pdc_request_needs_a_callsign(make_session):
+    session = make_session()
+    session.set_callsign("")
+
+    assert session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K") == (False, None)
+
+
+# --- failure paths ------------------------------------------------------------
+
+SENDS = [
+    ("logon", lambda s: s.logon("EGGX")),
+    ("logoff", lambda s: s.logoff()),
+    ("altitude", lambda s: s.send_altitude_change_request("FL350")),
+    ("direct", lambda s: s.send_direct_request("MALOT")),
+    ("speed", lambda s: s.send_speed_request("082", True)),
+    ("when-can-we", lambda s: s.send_when_can_we_expect("WHEN CAN WE EXPECT HIGHER LEVEL")),
+    ("acknowledgement", lambda s: s.send_acknowledgement(STATION, 7, "WILCO")),
+    ("telex", lambda s: s.send_telex("EDDF", "HELLO")),
+    ("pdc", lambda s: s.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")),
+]
+
+
+@pytest.mark.parametrize("send", [case[1] for case in SENDS], ids=[case[0] for case in SENDS])
+def test_a_transmission_failure_is_reported_and_consumes_no_min(logger, send):
+    """The error text reaches the dialog, and the MIN is not spent, so the
+    next successful send does not leave a gap the station has to explain."""
+    session = CpdlcSession(logger, FakeConnectionManager(raise_with=HoppieError("boom")))
+    session.set_callsign("BAW123")
+    session.current_station = STATION
+
+    assert send(session) == (False, "boom")
+    assert session.cpdlc_min_counter == 1
