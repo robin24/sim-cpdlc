@@ -1,6 +1,6 @@
 """Tests for CPDLC session state, especially logon acceptance validation."""
 
-from conftest import FakeConnectionManager
+from tests.support import FakeConnectionManager
 from src.model.cpdlc_session import CpdlcSession
 
 

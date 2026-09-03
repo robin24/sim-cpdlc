@@ -7,7 +7,7 @@ the network.
 
 import pytest
 
-from conftest import FakeConnectionManager
+from tests.support import FakeConnectionManager
 from src.model.cpdlc_elements import REASON_AIRCRAFT_PERFORMANCE, REASON_WEATHER
 from src.model.cpdlc_session import CpdlcSession
 

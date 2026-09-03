@@ -5,7 +5,7 @@ with NVDA+End, so a false 'Logged on to X' is the one message a blind pilot
 cannot cross-check.
 """
 
-from conftest import FakeConnectionManager, make_main_window, uplink
+from tests.support import FakeConnectionManager, make_main_window, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.model.cpdlc_session import CpdlcSession

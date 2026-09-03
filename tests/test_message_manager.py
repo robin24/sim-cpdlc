@@ -1,6 +1,6 @@
 """Tests for message identity, acknowledgement state and response options."""
 
-from conftest import uplink
+from tests.support import uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.model.message_manager import MessageManager

@@ -3,7 +3,7 @@
 import pytest
 import wx
 
-from conftest import uplink
+from tests.support import uplink
 from src.gui.message_view import MessageView
 from src.model.message_manager import MessageManager
 

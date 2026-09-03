@@ -1,6 +1,6 @@
 """End-to-end tests for the acknowledgement path through MainWindow."""
 
-from conftest import FakeConnectionManager, make_main_window, uplink
+from tests.support import FakeConnectionManager, make_main_window, uplink
 
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
