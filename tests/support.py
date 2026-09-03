@@ -10,6 +10,7 @@ from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
 
 from src.config import DEFAULT_CONFIG, save_config
 from src.model.connection_manager import PollResult
+from src.model.network_worker import NetworkWorker
 
 CLIENT_CALLSIGN = "DLH123"
 
@@ -37,6 +38,16 @@ def answerable(*stations):
     involved; answerable() with no stations means nobody is logged on.
     """
     return lambda sender: sender in stations
+
+
+def inline_worker(logger):
+    """A NetworkWorker with no thread.
+
+    Jobs run when the test calls run_pending(), on the test's own thread, and
+    each result is handed straight to its callback, so a test drives the
+    asynchronous path deterministically: submit, run_pending(), assert.
+    """
+    return NetworkWorker(logger, dispatch=lambda fn, *args: fn(*args), start_thread=False)
 
 
 class FakeConnectionManager:
