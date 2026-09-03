@@ -28,6 +28,7 @@ from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
 from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
+from src.controller.link_state import LinkState
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
     ConnectDialog,
@@ -110,6 +111,8 @@ class MainWindow(wx.Frame):
             DEFAULT_POLL_INTERVAL,
             ACTIVE_POLL_INTERVAL,
             INACTIVITY_TIMEOUT,
+            link_callback=self._on_link_change,
+            unreadable_callback=self._on_unreadable_messages,
         )
 
         # Initialize automatic weather updates
@@ -793,6 +796,86 @@ class MainWindow(wx.Frame):
             f"Stopped automatic updates for {subscription.describe()}: {error}",
             "SYSTEM",
         )
+
+    def _defer(self, callback, *args, **kwargs):
+        """Run a callback on the next pass of the event loop.
+
+        A modal dialog opened from inside a timer tick nests an event loop under
+        the handler, and the next tick then runs inside it; deferring keeps
+        every tick short.
+        """
+        wx.CallAfter(callback, *args, **kwargs)
+
+    def _on_link_change(self, old_state, new_state, reason):
+        """Announce the link transitions the status bar alone would hide.
+
+        NVDA does not announce status bar changes on its own, so losing the
+        link, getting it back and a rejected logon code each get a SYSTEM row
+        and the notification sound. A degraded link (one or two failed polls)
+        only changes the status bar, except that a callsign already in use is
+        named once so the pilot can look for the other client.
+
+        Args:
+            old_state: The LinkState before the transition
+            new_state: The LinkState after it
+            reason: The poll's reason text, None on recovery
+        """
+        if new_state == LinkState.LOST:
+            self._add_custom_message("Connection lost, retrying", "SYSTEM", play_sound=True)
+        elif new_state == LinkState.CONNECTED and old_state == LinkState.LOST:
+            self._add_custom_message("Connection restored", "SYSTEM", play_sound=True)
+        elif new_state == LinkState.DEGRADED and reason and "callsign already in use" in reason.lower():
+            self._add_custom_message(
+                "Connection problem: callsign already in use", "SYSTEM"
+            )
+        elif new_state == LinkState.FATAL:
+            self._on_fatal_link_error(reason)
+
+    def _on_fatal_link_error(self, reason):
+        """Tear the connection down after the server rejected the logon code.
+
+        Args:
+            reason: The server's reason text
+        """
+        self.logger.error(f"Disconnecting after a fatal link error: {reason}")
+        self.polling_controller.stop()
+        self.weather_monitor.stop()
+        self.weather_monitor.clear()
+        self.connection_manager.disconnect()
+        # Package 3 replaces these three lines with CpdlcSession.reset().
+        self.cpdlc_session.current_station = ""
+        self.cpdlc_session.pending_logon_min = None
+        self.cpdlc_session.pending_logon_station = None
+        self.menu_item_connect.SetItemLabel("&Connect")
+        self.menu_item_connect.SetHelp("Connect to the CPDLC network")
+        self.SetStatusText("Disconnected: logon code rejected.")
+        self._add_custom_message(
+            "Disconnected: the server rejected the logon code", "SYSTEM", play_sound=True
+        )
+        self._defer(
+            wx.MessageBox,
+            "The server rejected the logon code. Check it under File > Settings, "
+            "then connect again.",
+            "Logon Code Rejected",
+            wx.OK | wx.ICON_ERROR,
+        )
+
+    def _on_unreadable_messages(self, unreadable):
+        """Tell the pilot about uplinks that arrived but could not be decoded.
+
+        The server has already marked them delivered, so the controller will
+        be waiting for a response the pilot never saw. The raw packet is shown
+        so it can be read out or asked about by voice.
+
+        Args:
+            unreadable: List of UnreadableMessage records from one poll
+        """
+        for item in unreadable:
+            self._add_custom_message(
+                f"Unreadable message from {item.sender}: {item.raw}",
+                "SYSTEM",
+                play_sound=True,
+            )
 
     def on_pdc_request(self, _):
         """Request a pre-departure clearance from departure airport."""
