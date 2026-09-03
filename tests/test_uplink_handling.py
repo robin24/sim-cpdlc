@@ -24,7 +24,7 @@ CONTACT = "CONTACT MARSEILLE CONTROL ON @133.325@."
 def build(logger, config=None, simconnect=None):
     connection = FakeConnectionManager()
     session = CpdlcSession(logger, connection)
-    session.set_callsign("DLH123")
+    session.begin_session("DLH123", "hoppie")
     session.handle_logon_accepted(CURRENT)
     simconnect = simconnect if simconnect is not None else FakeSimConnectManager()
     window = make_main_window(

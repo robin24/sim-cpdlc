@@ -19,7 +19,7 @@ STATION = "EGGX"
 def make_session(logger):
     def build(connected=True, station=STATION):
         session = CpdlcSession(logger, FakeConnectionManager(connected=connected))
-        session.set_callsign("BAW123")
+        session.begin_session("BAW123", "hoppie")
         session.current_station = station
         return session
 
@@ -150,7 +150,7 @@ def test_a_pdc_request_is_a_telex_to_the_departure_airport(session):
 
 def test_a_pdc_request_needs_a_callsign(make_session):
     session = make_session()
-    session.set_callsign("")
+    session.callsign = ""
 
     assert session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K") == (False, None)
 
@@ -158,25 +158,28 @@ def test_a_pdc_request_needs_a_callsign(make_session):
 # --- failure paths ------------------------------------------------------------
 
 SENDS = [
-    ("logon", lambda s: s.logon("EGGX")),
-    ("logoff", lambda s: s.logoff()),
-    ("altitude", lambda s: s.send_altitude_change_request("FL350")),
-    ("direct", lambda s: s.send_direct_request("MALOT")),
-    ("speed", lambda s: s.send_speed_request("082", True)),
-    ("when-can-we", lambda s: s.send_when_can_we_expect("WHEN CAN WE EXPECT HIGHER LEVEL")),
-    ("acknowledgement", lambda s: s.send_acknowledgement(STATION, 7, "WILCO")),
-    ("telex", lambda s: s.send_telex("EDDF", "HELLO")),
-    ("pdc", lambda s: s.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")),
+    # (name, station logged on before the send, the send)
+    ("logon", "", lambda s: s.logon("EGGX")),
+    ("logoff", STATION, lambda s: s.logoff()),
+    ("altitude", STATION, lambda s: s.send_altitude_change_request("FL350")),
+    ("direct", STATION, lambda s: s.send_direct_request("MALOT")),
+    ("speed", STATION, lambda s: s.send_speed_request("082", True)),
+    ("when-can-we", STATION, lambda s: s.send_when_can_we_expect("WHEN CAN WE EXPECT HIGHER LEVEL")),
+    ("acknowledgement", STATION, lambda s: s.send_acknowledgement(STATION, 7, "WILCO")),
+    ("telex", STATION, lambda s: s.send_telex("EDDF", "HELLO")),
+    ("pdc", STATION, lambda s: s.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")),
 ]
 
 
-@pytest.mark.parametrize("send", [case[1] for case in SENDS], ids=[case[0] for case in SENDS])
-def test_a_transmission_failure_is_reported_and_consumes_no_min(logger, send):
+@pytest.mark.parametrize(
+    "station, send", [case[1:] for case in SENDS], ids=[case[0] for case in SENDS]
+)
+def test_a_transmission_failure_is_reported_and_consumes_no_min(logger, station, send):
     """The error text reaches the dialog, and the MIN is not spent, so the
     next successful send does not leave a gap the station has to explain."""
     session = CpdlcSession(logger, FakeConnectionManager(raise_with=HoppieError("boom")))
-    session.set_callsign("BAW123")
-    session.current_station = STATION
+    session.begin_session("BAW123", "hoppie")
+    session.current_station = station
 
     assert send(session) == (False, "boom")
     assert session.cpdlc_min_counter == 1

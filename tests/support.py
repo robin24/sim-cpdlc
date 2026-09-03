@@ -180,6 +180,23 @@ class FakeCallLater:
         self.stopped = True
 
 
+class FakeClock:
+    """A monotonic clock the test moves by hand, for the session's time windows.
+
+    Args:
+        now: The starting reading, in seconds
+    """
+
+    def __init__(self, now=1000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
 class MessageBoxes:
     """Records wx.MessageBox calls and answers them without showing anything."""
 

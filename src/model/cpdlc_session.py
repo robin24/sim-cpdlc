@@ -1,6 +1,7 @@
 """CPDLC session management for the client."""
 
 import logging
+import time
 from typing import Optional, Callable, Tuple
 
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
@@ -10,30 +11,74 @@ from src.utils.weather_parsing import report_type_label
 
 
 class CpdlcSession:
-    """Manages CPDLC session state and operations."""
+    """Manages CPDLC session state and operations.
 
-    def __init__(self, logger, connection_manager: ConnectionManager):
+    The session knows who the aircraft is talking to: the station logged on
+    and a REQUEST LOGON still waiting for its answer. reset() forgets all of
+    it; the callsign and network survive, because they identify the aircraft
+    rather than the dialogue.
+    """
+
+    def __init__(
+        self,
+        logger,
+        connection_manager: ConnectionManager,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         """Initialize the CPDLC session.
 
         Args:
             logger: Application logger
             connection_manager: Connection manager instance
+            clock: Returns the current time in seconds. Monotonic, so the
+                session's time windows are not upset by a clock change; tests
+                pass a hand-driven clock.
         """
         self.logger = logger
         self.connection_manager = connection_manager
+        self.clock = clock
+        self.callsign = ""
+        self.network = None
         self.current_station = ""
         self.cpdlc_min_counter = 1
-        self.callsign = ""
         self.pending_logon_min = None
         self.pending_logon_station = None
+        self.pending_logon_at = None
 
-    def set_callsign(self, callsign: str):
-        """Set the aircraft callsign.
+    def reset(self) -> None:
+        """Forget the ATC dialogue: station, pending logon and MIN counter.
+
+        The window calls this on File > Disconnect whether or not the LOGOFF
+        could be sent, on a fatal link error, and (through begin_session) when
+        the aircraft's identity changes. Audit M-1: without it a disconnect
+        left the app believing it was still logged on.
+        """
+        self.current_station = ""
+        self.cpdlc_min_counter = 1
+        self._clear_pending()
+        self.logger.debug("CPDLC session state reset")
+
+    def begin_session(self, callsign: str, network: Optional[str]) -> None:
+        """Record the identity of a new network connection.
+
+        The network holds the ATC logon by callsign, so reconnecting as the
+        same aircraft on the same network keeps the dialogue; any change of
+        identity starts from a clean one.
 
         Args:
             callsign: The aircraft callsign
+            network: The network type, "hoppie" or "sayintentions"
         """
+        if (callsign, network) != (self.callsign, self.network):
+            self.reset()
         self.callsign = callsign
+        self.network = network
+
+    def _clear_pending(self) -> None:
+        """Forget a REQUEST LOGON that is waiting for its answer."""
+        self.pending_logon_min = None
+        self.pending_logon_station = None
+        self.pending_logon_at = None
 
     def get_callsign(self) -> str:
         """Get the current aircraft callsign.
@@ -62,6 +107,11 @@ class CpdlcSession:
     def logon(self, station: str) -> Tuple[bool, Optional[str]]:
         """Logon to a CPDLC station.
 
+        A station still logged on is sent LOGOFF first, so it learns the
+        dialogue has ended before the next one starts (audit M-7). If that
+        LOGOFF cannot be sent nothing else is: the app never has a dialogue
+        open with two stations, and the pilot retries once the link is back.
+
         Args:
             station: The station to logon to
 
@@ -81,6 +131,12 @@ class CpdlcSession:
             )
             return False, None
 
+        if self.current_station:
+            previous = self.current_station
+            sent, detail = self.logoff()
+            if not sent:
+                return False, f"could not send LOGOFF to {previous}: {detail}"
+
         self.logger.info(f"Attempting to logon to station: {station}")
         self.cpdlc_min_counter = 1
         message = "REQUEST LOGON"
@@ -96,9 +152,11 @@ class CpdlcSession:
             self.logger.error(f"Failed to send logon request to {station}: {exc}")
             return False, str(exc)
 
-        # Track pending logon for MRN validation on LOGON ACCEPTED
+        # Track the pending logon for MRN validation on LOGON ACCEPTED, and
+        # when it was sent so an unanswered request can be given up on
         self.pending_logon_min = self.cpdlc_min_counter
         self.pending_logon_station = station
+        self.pending_logon_at = self.clock()
 
         # Don't set current_station yet, just increment the counter
         self.cpdlc_min_counter += 1
@@ -133,10 +191,12 @@ class CpdlcSession:
             )
             return False, str(exc)
 
-        # Update session state
+        # Update session state. A logon that was still pending is abandoned
+        # too: the pilot is leaving the dialogue, not waiting on it.
         previous_station = self.current_station
         self.cpdlc_min_counter += 1
         self.current_station = ""
+        self._clear_pending()
         self.logger.info(f"Successfully logged off from {previous_station}")
         return True, message
 
@@ -432,8 +492,7 @@ class CpdlcSession:
 
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
-        self.pending_logon_min = None
-        self.pending_logon_station = None
+        self._clear_pending()
         return True
 
     def handle_station_logoff(self, station: str) -> None:

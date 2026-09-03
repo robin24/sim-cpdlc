@@ -13,7 +13,7 @@ STATION = "LSAG"
 def build(logger, connection=None):
     connection = connection if connection is not None else FakeConnectionManager()
     session = CpdlcSession(logger, connection)
-    session.set_callsign("DLH123")
+    session.begin_session("DLH123", "hoppie")
     session.handle_logon_accepted(STATION)
     manager = MessageManager(logger)
     window = make_main_window(logger, session, manager)
