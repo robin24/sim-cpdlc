@@ -13,7 +13,7 @@ import pytest
 import requests
 import wx
 
-from tests.support import MessageBoxes
+from tests.support import MessageBoxes, MessageDialogs
 from src import config as config_module
 
 
@@ -55,6 +55,8 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(requests, "get", refuse)
     monkeypatch.setattr(requests, "post", refuse)
+    monkeypatch.setattr(requests, "request", refuse)
+    monkeypatch.setattr(requests.Session, "request", refuse)
     monkeypatch.setattr(webbrowser, "open", refuse)
 
 
@@ -89,6 +91,18 @@ def message_boxes(monkeypatch):
     """
     recorder = MessageBoxes()
     monkeypatch.setattr(wx, "MessageBox", recorder)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def message_dialogs(monkeypatch):
+    """Replace wx.MessageDialog with a recorder so no test can block on one.
+
+    _check_first_launch() opens a MessageDialog whenever the config file is
+    missing, which is the default state of the isolated config.
+    """
+    recorder = MessageDialogs()
+    monkeypatch.setattr(wx, "MessageDialog", recorder)
     return recorder
 
 

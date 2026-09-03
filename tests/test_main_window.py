@@ -17,8 +17,7 @@ from src.config import DEFAULT_CONFIG, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
-
-MENU_TITLES = ["File", "Requests"]
+from tests.support import FakeSimConnectManager
 
 # Which handler each menu item must fire. Every handler is replaced on the
 # class before the window is built, so the Bind() calls in _init_menu pick up
@@ -45,6 +44,8 @@ MENU_BINDINGS = {
     },
 }
 
+MENU_TITLES = list(MENU_BINDINGS)
+
 
 @pytest.fixture
 def build_window(logger, wx_app, isolated_config, message_boxes):
@@ -57,9 +58,15 @@ def build_window(logger, wx_app, isolated_config, message_boxes):
     built = []
 
     def build():
+        # Writing the config file first keeps _check_first_launch() from
+        # asking anything at all; the message_dialogs recorder is the safety
+        # net if that ever stops being true.
         assert save_config({**DEFAULT_CONFIG, "auto_check_updates": False})
         window = mw.MainWindow(None, "Sim-CPDLC test", logger)
         window.Hide()
+        # A real SimConnectManager would try to reach a running MSFS; swap in
+        # the fake so a CONTACT uplink through this window tunes nothing.
+        window.simconnect_manager = FakeSimConnectManager()
         built.append(window)
         return window
 
@@ -102,18 +109,7 @@ def test_the_requests_menu_carries_every_request(window):
 
     labels = [item.GetItemLabelText() for item in requests.GetMenuItems()]
 
-    assert labels == [
-        "PDC",
-        "Logon",
-        "Logoff",
-        "Altitude change",
-        "Direct to",
-        "Speed change",
-        "When can we expect",
-        "Telex message",
-        "ATIS and Weather request",
-        "Automatic weather updates",
-    ]
+    assert labels == list(MENU_BINDINGS["Requests"])
 
 
 def _mnemonic(label):
@@ -216,6 +212,11 @@ def test_every_menu_item_fires_its_own_handler(build_window, monkeypatch):
 def test_a_request_needing_a_connection_is_refused_and_the_user_is_told(window, message_boxes):
     assert window._require_connection("test") is False
     assert message_boxes.captions == ["Not Connected"]
+
+
+def test_the_real_window_never_reaches_the_simulator(window):
+    """A CONTACT uplink through this fixture must tune the fake, not MSFS."""
+    assert isinstance(window.simconnect_manager, FakeSimConnectManager)
 
 
 # --- the message list ---------------------------------------------------------

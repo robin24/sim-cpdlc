@@ -52,7 +52,7 @@ def test_a_non_numeric_interval_falls_back_to_the_default():
 # --- reading and writing the file ---------------------------------------------
 
 
-def test_a_missing_file_yields_a_fresh_copy_of_the_defaults():
+def test_a_missing_file_yields_a_fresh_copy_of_the_defaults(isolated_config):
     loaded = load_config()
 
     assert loaded == DEFAULT_CONFIG
@@ -74,11 +74,11 @@ def test_invalid_json_yields_the_defaults(isolated_config):
     assert load_config() == DEFAULT_CONFIG
 
 
-def test_only_a_mapping_can_be_saved():
+def test_only_a_mapping_can_be_saved(isolated_config):
     assert save_config("nope") is False
 
 
-def test_a_saved_config_round_trips():
+def test_a_saved_config_round_trips(isolated_config):
     assert save_config({**DEFAULT_CONFIG, "simbrief_userid": "42"}) is True
 
     assert load_config()["simbrief_userid"] == "42"

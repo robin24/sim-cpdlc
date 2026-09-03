@@ -126,6 +126,36 @@ class MessageBoxes:
         return [caption for _, caption, _ in self.calls]
 
 
+class MessageDialogs:
+    """Stands in for wx.MessageDialog: records the request, answers without showing.
+
+    The default answer is wx.ID_NO because the first-launch prompt reacts to
+    ID_YES by scheduling the real Settings dialog through wx.CallAfter.
+    """
+
+    class _Dialog:
+        def __init__(self, recorder):
+            self._recorder = recorder
+
+        def ShowModal(self):
+            return self._recorder.answer
+
+        def Destroy(self):
+            return True
+
+    def __init__(self):
+        self.calls = []
+        self.answer = wx.ID_NO
+
+    def __call__(self, parent, message, caption="Message", style=wx.OK, *args, **kwargs):
+        self.calls.append((message, caption, style))
+        return self._Dialog(self)
+
+    @property
+    def captions(self):
+        return [caption for _, caption, _ in self.calls]
+
+
 def make_main_window(logger, cpdlc_session, message_manager, config=None, simconnect=None):
     """Build a MainWindow whose wx.Frame half is never initialised.
 

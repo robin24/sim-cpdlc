@@ -33,6 +33,10 @@ def test_network_access_is_refused():
         requests.get("https://example.invalid/")
     with pytest.raises(RuntimeError, match="network access in a test"):
         requests.post("https://example.invalid/")
+    with pytest.raises(RuntimeError, match="network access in a test"):
+        requests.request("GET", "https://example.invalid/")
+    with pytest.raises(RuntimeError, match="network access in a test"):
+        requests.Session().get("https://example.invalid/")
 
 
 def test_opening_a_browser_is_refused():
@@ -59,3 +63,19 @@ def test_the_connect_dialog_never_reaches_simbrief(frame, no_simbrief, message_b
         assert message_boxes.captions == ["SimBrief"]
     finally:
         dialog.Destroy()
+
+
+def test_a_first_launch_asks_through_the_recorder_not_a_real_dialog(
+    logger, wx_app, isolated_config, message_dialogs
+):
+    """With no config file, MainWindow.__init__ writes the defaults and asks
+    whether to set them up; both must stay inside the test."""
+    import src.gui.main_window as mw
+
+    window = mw.MainWindow(None, "Sim-CPDLC test", logger)
+    try:
+        assert message_dialogs.captions == ["Welcome to Sim-CPDLC"]
+        assert Path(isolated_config).exists()
+    finally:
+        window.weather_monitor.shutdown()
+        window.Destroy()

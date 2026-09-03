@@ -5,7 +5,8 @@ window, the automatic weather update logic and the main window wiring. They
 need no network connection, no running simulator and no ACARS logon code, and
 the fixtures in `conftest.py` make sure of it: every test gets a temporary
 config file, outbound requests and browser launches raise, SimBrief lookups
-answer with no flight plan, and `wx.MessageBox` is a recorder.
+answer with no flight plan, and `wx.MessageBox` and `wx.MessageDialog` are
+recorders.
 
 Run them from the repository root:
 
