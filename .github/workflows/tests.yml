@@ -10,6 +10,7 @@ jobs:
     # Windows to match build-and-release.yml: this is a Windows app and the
     # GUI tests construct real wx windows.
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code

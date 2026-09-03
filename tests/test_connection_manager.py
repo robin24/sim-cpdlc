@@ -412,26 +412,31 @@ def test_install_request_timeout_supplies_a_default(monkeypatch):
     sock.settimeout(None) when given no timeout."""
     seen = {}
 
-    def _get(url, **kwargs):
+    def _request(url, **kwargs):
         seen.update(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests, "get", _request)
+    monkeypatch.setattr(requests, "post", _request)
     install_request_timeout(7)
 
     requests.get("https://example.invalid/")
+    assert seen["timeout"] == 7
 
+    seen.clear()
+    requests.post("https://example.invalid/")
     assert seen["timeout"] == 7
 
 
 def test_an_explicit_timeout_still_wins(monkeypatch):
     seen = {}
 
-    def _get(url, **kwargs):
+    def _request(url, **kwargs):
         seen.update(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests, "get", _request)
+    monkeypatch.setattr(requests, "post", _request)
     install_request_timeout(7)
 
     requests.get("https://example.invalid/", timeout=1)
