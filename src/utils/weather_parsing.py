@@ -22,6 +22,11 @@ ATIS_TYPES = ("vatatis",)
 _WHITESPACE = re.compile(r"\s+")
 _NON_REPORT_CHARS = re.compile(r"[^A-Z0-9 ]")
 
+# Zulu time groups, e.g. "1150Z" or "261150Z". Stripped only from an ATIS
+# whose information letter could not be read, where the time is the one part
+# guaranteed to differ between otherwise identical broadcasts.
+_TIME_GROUP = re.compile(r"\b\d{4}(?:\d{2})?Z\b")
+
 # Words that introduce the ATIS information letter rather than being it.
 _LETTER_MARKERS = frozenset({"INFORMATION", "INFO", "ATIS"})
 
@@ -175,9 +180,12 @@ def report_signature(text, info_type, icao=None):
     """Build the value used to decide whether a report has actually changed.
 
     ATIS reports are compared by information letter so that a re-worded but
-    otherwise identical broadcast doesn't announce itself as new. Everything
-    else is compared on its normalized text, so a SPECI or an amended TAF is
-    correctly treated as a new report.
+    otherwise identical broadcast doesn't announce itself as new. When no
+    letter can be read they fall back to their text with the time group
+    removed, since that is the only part that moves between identical
+    broadcasts. Everything else is compared on its full normalized text: a
+    METAR is identified by its observation time, so the same conditions an
+    hour later is genuinely a new report.
 
     Args:
         text: The raw report text.
@@ -191,6 +199,12 @@ def report_signature(text, info_type, icao=None):
         letter = extract_atis_letter(text, icao)
         if letter:
             return f"INFO:{letter}"
+        # No letter to compare, so fall back to the text -- but drop the time
+        # group first. An ATIS is re-broadcast unchanged between issues, and
+        # only its timestamp moves, so comparing the raw text would announce
+        # the same broadcast on every check.
+        return _TIME_GROUP.sub("", normalize_report(text)).strip()
+
     return normalize_report(text)
 
 

@@ -113,14 +113,20 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         self.stop_button.Enable(has_items and has_selection)
 
     def on_check_now(self, _):
-        """Run an update cycle straight away."""
-        self.weather_monitor.check_now()
-        wx.MessageBox(
-            "Checking all subscribed reports now. You will be notified of any that "
-            "have changed.",
-            "Automatic Weather Updates",
-            wx.OK | wx.ICON_INFORMATION,
-        )
+        """Run an update cycle straight away, if one can start."""
+        if self.weather_monitor.check_now():
+            message = (
+                "Checking all subscribed reports now. You will be notified of "
+                "any that have changed."
+            )
+        else:
+            message = (
+                "Could not check just now: either a check is already running, "
+                "or you are not connected to the network. Nothing has been "
+                "requested."
+            )
+
+        wx.MessageBox(message, "Automatic Weather Updates", wx.OK | wx.ICON_INFORMATION)
 
     def on_stop(self, _):
         """Stop updating the selected report."""

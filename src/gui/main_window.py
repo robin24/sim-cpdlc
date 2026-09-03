@@ -18,7 +18,7 @@ from src.config import (
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
     MESSAGE_SOUND_FILENAME,
-    DEFAULT_WEATHER_INTERVAL_MINUTES,
+    weather_interval_minutes,
     load_config,
     save_config,
 )
@@ -113,9 +113,7 @@ class MainWindow(wx.Frame):
         )
 
         # Initialize automatic weather updates
-        interval_minutes = config.get(
-            "weather_update_interval", DEFAULT_WEATHER_INTERVAL_MINUTES
-        )
+        interval_minutes = weather_interval_minutes(config)
         self.weather_monitor = WeatherMonitor(
             logger,
             self.connection_manager,
@@ -247,9 +245,7 @@ class MainWindow(wx.Frame):
         current_simbrief_userid = config.get("simbrief_userid", "")
         current_auto_check_updates = config.get("auto_check_updates", True)
         current_auto_tune_com1 = config.get("auto_tune_com1", True)
-        current_weather_interval = config.get(
-            "weather_update_interval", DEFAULT_WEATHER_INTERVAL_MINUTES
-        )
+        current_weather_interval = weather_interval_minutes(config)
 
         dlg = SettingsDialog(
             self,

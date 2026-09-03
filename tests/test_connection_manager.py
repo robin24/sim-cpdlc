@@ -332,27 +332,23 @@ def test_api_url_follows_the_selected_network(logger):
 # --- information requests -----------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["metar", "atis"])
+@pytest.mark.parametrize("kind", ["metar", "vatatis"])
 def test_an_information_request_unwraps_the_server_envelope(
     logger, monkeypatch, kind
 ):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "ok {server info {EDDF 121250Z 27010KT CAVOK}}")
 
-    request = cm.send_metar_request if kind == "metar" else cm.send_atis_request
-
-    assert request("EDDF") == "EDDF 121250Z 27010KT CAVOK"
+    assert cm.send_info_request(kind, "EDDF") == "EDDF 121250Z 27010KT CAVOK"
 
 
-@pytest.mark.parametrize("kind", ["metar", "atis"])
+@pytest.mark.parametrize("kind", ["metar", "vatatis"])
 def test_an_information_request_reports_a_server_error(logger, monkeypatch, kind):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "error {invalid logon}")
 
-    request = cm.send_metar_request if kind == "metar" else cm.send_atis_request
-
     with pytest.raises(HoppieError):
-        request("EDDF")
+        cm.send_info_request(kind, "EDDF")
 
 
 def test_an_information_request_sends_a_timeout(logger, monkeypatch):
@@ -366,7 +362,7 @@ def test_an_information_request_sends_a_timeout(logger, monkeypatch):
 
     cm = connected(logger, monkeypatch)
     monkeypatch.setattr(requests, "get", _get)
-    cm.send_metar_request("EDDF")
+    cm.send_info_request("metar", "EDDF")
 
     assert seen["timeout"] is not None
 
@@ -375,7 +371,7 @@ def test_an_information_request_requires_a_connection(logger):
     cm = ConnectionManager(logger)
 
     with pytest.raises(HoppieError):
-        cm.send_metar_request("EDDF")
+        cm.send_info_request("metar", "EDDF")
 
 
 def test_a_failing_weather_request_does_not_trip_reconnection(logger, monkeypatch):

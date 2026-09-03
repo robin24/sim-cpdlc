@@ -11,12 +11,9 @@ STATION = "LSAG"
 
 
 @pytest.fixture
-def panel():
-    app = wx.App()
-    frame = wx.Frame(None)
-    yield wx.Panel(frame)
-    frame.Destroy()
-    app.Destroy()
+def panel(frame):
+    """A panel to build the view on, torn down with the shared frame."""
+    return wx.Panel(frame)
 
 
 def build_view(panel, logger, manager, station):

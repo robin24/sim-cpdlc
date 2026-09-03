@@ -261,19 +261,6 @@ class CpdlcSession:
             self.logger.error(f"Failed to request {label} for {icao}: {exc}")
             return False, str(exc)
 
-    def request_atis(self, icao: str) -> Tuple[bool, Optional[str]]:
-        """Request ATIS information for an airport.
-
-        Args:
-            icao: Airport ICAO code
-
-        Returns:
-            tuple: (success, atis_text_or_error)
-        """
-        return self._request_info(
-            icao, "ATIS", self.connection_manager.send_atis_request
-        )
-
     def send_direct_request(
         self, fix: str, reason: Optional[str] = None
     ) -> Tuple[bool, Optional[str]]:
@@ -379,19 +366,6 @@ class CpdlcSession:
 
         self.cpdlc_min_counter += 1
         return True, message_text
-
-    def request_metar(self, icao: str) -> Tuple[bool, Optional[str]]:
-        """Request METAR information for an airport.
-
-        Args:
-            icao: Airport ICAO code
-
-        Returns:
-            tuple: (success, metar_text_or_error)
-        """
-        return self._request_info(
-            icao, "METAR", self.connection_manager.send_metar_request
-        )
 
     def send_telex(self, recipient: str, message: str) -> Tuple[bool, Optional[str]]:
         """Send a TELEX message.

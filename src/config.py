@@ -117,6 +117,30 @@ DEFAULT_WEATHER_INTERVAL_MINUTES = 5
 MIN_WEATHER_INTERVAL_MINUTES = 1
 MAX_WEATHER_INTERVAL_MINUTES = 60
 
+
+def weather_interval_minutes(config):
+    """Return the automatic weather interval, clamped to a sane range.
+
+    load_config() fills in missing keys but validates neither type nor range,
+    so a hand-edited or downgrade-written file reaches the application as-is.
+    The settings dialog enforces the bounds through its SpinCtrl, which a user
+    who never opens it never goes through: zero would start a wx.Timer firing
+    as fast as the event loop allows, and a string would make the
+    minutes-to-milliseconds multiply build a 60000-character string.
+
+    Args:
+        config: The loaded configuration mapping
+
+    Returns:
+        int: Minutes between checks, within MIN_ and MAX_WEATHER_INTERVAL_MINUTES
+    """
+    minutes = config.get("weather_update_interval", DEFAULT_WEATHER_INTERVAL_MINUTES)
+
+    if not isinstance(minutes, int) or isinstance(minutes, bool):
+        return DEFAULT_WEATHER_INTERVAL_MINUTES
+
+    return max(MIN_WEATHER_INTERVAL_MINUTES, min(MAX_WEATHER_INTERVAL_MINUTES, minutes))
+
 # Network timeout in seconds, applied to every outbound ACARS request.
 # hoppie_connector sets no timeout of its own, so without this a server that
 # accepts the connection and then stops responding would block forever.
