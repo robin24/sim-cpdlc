@@ -77,5 +77,6 @@ def test_a_first_launch_asks_through_the_recorder_not_a_real_dialog(
         assert message_dialogs.captions == ["Welcome to Sim-CPDLC"]
         assert Path(isolated_config).exists()
     finally:
+        window.worker.shutdown(timeout=1)
         window.weather_monitor.shutdown()
         window.Destroy()

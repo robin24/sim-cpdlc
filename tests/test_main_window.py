@@ -72,6 +72,7 @@ def build_window(logger, wx_app, isolated_config, message_boxes):
 
     yield build
     for window in built:
+        window.worker.shutdown(timeout=1)
         window.weather_monitor.clear()
         window.weather_monitor.shutdown()
         window.Destroy()
@@ -221,12 +222,14 @@ def test_the_real_window_never_reaches_the_simulator(window):
 
 def test_the_real_window_listens_to_its_polling_controller(window):
     """The link, unreadable and tick callbacks are how a lost link, a dropped
-    uplink and an unanswered logon reach the message list at all."""
+    uplink and an unanswered logon reach the message list at all, and the
+    worker is where every poll runs."""
     controller = window.polling_controller
 
     assert controller.link_callback == window._on_link_change
     assert controller.unreadable_callback == window._on_unreadable_messages
     assert controller.tick_callback == window._on_poll_tick
+    assert controller.worker is window.worker
 
 
 # --- the message list ---------------------------------------------------------

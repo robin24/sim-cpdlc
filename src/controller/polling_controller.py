@@ -7,8 +7,9 @@ import wx
 from hoppie_connector import HoppieMessage, CpdlcMessage, TelexMessage
 from src.config import MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
 from src.controller.link_state import LinkState
-from src.model.connection_manager import ConnectionManager
+from src.model.connection_manager import ConnectionManager, PollResult
 from src.model.message_manager import CPDLC_RESPONSES
+from src.model.network_worker import PRIORITY_LINK
 from src.utils.message_formatting import extract_message_content
 
 
@@ -25,6 +26,10 @@ class PollingController:
     is lost the tick interval follows its back-off ladder, and a successful poll
     restores it. Polling never stops on its own except when the server rejects
     the logon code, which no retry can fix.
+
+    The poll itself runs on the network worker: a tick submits it and returns,
+    the result comes back on the GUI thread and re-arms the timer. One poll is
+    out at a time; a tick that fires while it is still out only re-arms.
     """
 
     def __init__(
@@ -39,6 +44,7 @@ class PollingController:
         link_callback=None,
         unreadable_callback=None,
         tick_callback=None,
+        worker=None,
     ):
         """Initialize the polling controller.
 
@@ -60,6 +66,7 @@ class PollingController:
             tick_callback: Callback() run at the end of every tick, whatever
                 the poll returned, for housekeeping that keeps the poll's
                 rhythm, such as giving up on an unanswered logon
+            worker: The NetworkWorker that runs the polls
         """
         self.logger = logger
         self.connection_manager = connection_manager
@@ -67,6 +74,10 @@ class PollingController:
         self.link_callback = link_callback
         self.unreadable_callback = unreadable_callback
         self.tick_callback = tick_callback
+        self.worker = worker
+        # True from submitting a poll until its result arrives, so a slow
+        # server never has two polls stacked behind it.
+        self._poll_in_flight = False
         self.default_poll_interval = default_poll_interval
         self.active_poll_interval = active_poll_interval
         self.inactivity_timeout = inactivity_timeout
@@ -118,6 +129,7 @@ class PollingController:
 
         self._active_mode = False
         self._stopped = False
+        self._poll_in_flight = False
         self.link.reset()
         self._schedule_next()
         self.logger.info(
@@ -157,11 +169,43 @@ class PollingController:
         self.logger.debug(f"Next poll in {interval}ms")
 
     def on_poll_timer(self, event):
-        """Handle poll timer event."""
+        """Handle poll timer event: submit the poll to the worker."""
         if not self.connection_manager.is_connected():
             self.logger.warning("Not connected; stopping poll timer")
             self.stop()
             return
+
+        if self._poll_in_flight:
+            # The previous poll has not answered yet. Polling again would only
+            # queue a second request behind it; keep the timer alive instead.
+            self.logger.debug("Poll still in flight; skipping this tick")
+            self._schedule_next()
+            return
+
+        self._poll_in_flight = True
+        self.worker.submit(
+            "poll", self.connection_manager.poll, self._on_poll_result, PRIORITY_LINK
+        )
+
+    def _on_poll_result(self, job_result):
+        """Process a poll's result. Runs on the GUI thread.
+
+        Args:
+            job_result: The worker's JobResult wrapping the PollResult
+        """
+        self._poll_in_flight = False
+        if self._stopped:
+            # Stopped (disconnect, or a fatal error) while the poll was out.
+            return
+
+        if job_result.ok:
+            result = job_result.value
+        else:
+            # poll() never raises; a bug there is still one failed poll, not
+            # the end of polling.
+            result = PollResult(
+                ok=False, reason=job_result.error, failures=self.link.failures + 1
+            )
 
         # The timer is one-shot, so the next tick only happens if this handler
         # arranges it. Message handling reaches into the GUI, SimConnect and a
@@ -169,7 +213,6 @@ class PollingController:
         # for the rest of the session. stop() sets _stopped, so the fatal
         # branch below still ends polling deliberately.
         try:
-            result = self.connection_manager.poll()
             link_error = None
             try:
                 self.link.record_poll(result)

@@ -29,6 +29,7 @@ from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
 from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
+from src.model.network_worker import NetworkWorker
 from src.controller.link_state import LinkState
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
@@ -107,6 +108,10 @@ class MainWindow(wx.Frame):
         else:
             self.logger.debug("Auto-update check disabled")
 
+        # One thread for every network call, so the GUI thread never waits on
+        # the network and every result comes back through the event loop.
+        self.worker = NetworkWorker(logger)
+
         # Initialize controller
         self.polling_controller = PollingController(
             logger,
@@ -118,6 +123,7 @@ class MainWindow(wx.Frame):
             link_callback=self._on_link_change,
             unreadable_callback=self._on_unreadable_messages,
             tick_callback=self._on_poll_tick,
+            worker=self.worker,
         )
         # Handle of a scheduled acknowledgement retry, so a disconnect or a
         # fatal teardown can cancel it before it fires against a dead link.

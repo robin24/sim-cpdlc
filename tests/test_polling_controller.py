@@ -2,9 +2,7 @@
 
 import logging
 
-import pytest
-
-from tests.support import FakeConnectionManager, uplink
+from tests.support import FakeConnectionManager, inline_worker, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.controller.polling_controller import PollingController
@@ -15,6 +13,25 @@ from src.model.message_manager import CPDLC_RESPONSES
 
 def controller(logger):
     return PollingController(logger, connection_manager=None)
+
+
+def build(logger, connection, message_callback=None, **kwargs):
+    """A controller wired to an inline worker.
+
+    Returns:
+        tuple: (poller, worker)
+    """
+    worker = inline_worker(logger)
+    poller = PollingController(logger, connection, message_callback, worker=worker, **kwargs)
+    return poller, worker
+
+
+def tick(poller, worker):
+    """Run one timer tick the way wx would: the one-shot has already stopped,
+    the poll runs on the worker, and its result comes back to the controller."""
+    poller.poll_timer.Stop()
+    poller.on_poll_timer(None)
+    worker.run_pending()
 
 
 def test_a_bare_acknowledgement_does_not_speed_up_polling(logger):
@@ -75,7 +92,7 @@ def test_a_stopped_poller_does_not_reschedule_itself(logger, frame):
     """Each tick arranges the next one, so a stop that failed to take would
     leave the timer running for the rest of the session.
     """
-    poller = PollingController(logger, FakeConnectionManager())
+    poller, _ = build(logger, FakeConnectionManager())
     poller.start(frame)
 
     poller.stop()
@@ -100,18 +117,24 @@ class RaisingConnection:
 
 def test_a_poll_that_raises_still_schedules_the_next_one(logger, frame):
     """The timer is one-shot, so a tick that dies without rescheduling ends
-    polling for the session while the status bar still reads Connected."""
+    polling for the session while the status bar still reads Connected.
+
+    The worker contains the callback's exception (NetworkWorker._deliver logs
+    and drops it, the same as any other on_done failure), so nothing raises
+    here any more; what still matters is that the poll ran and the timer was
+    rearmed regardless.
+    """
     connection = RaisingConnection()
 
     def explode(_message):
         raise RuntimeError("SimConnect went away")
 
-    poller = PollingController(logger, connection, explode)
+    poller, worker = build(logger, connection, explode)
     poller.start(frame)
     poller.poll_timer.Stop()
 
-    with pytest.raises(RuntimeError):
-        poller.on_poll_timer(None)
+    poller.on_poll_timer(None)
+    worker.run_pending()
 
     assert poller.is_running() is True
     assert connection.polls == 1
@@ -130,14 +153,14 @@ def test_a_dropped_message_is_logged_before_it_propagates(logger, frame, caplog)
     def explode(_message):
         raise RuntimeError("SimConnect went away")
 
-    poller = PollingController(logger, connection, explode)
+    poller, worker = build(logger, connection, explode)
     poller.start(frame)
     poller.poll_timer.Stop()
 
     with caplog.at_level(logging.ERROR, logger=logger.name):
         logger.addHandler(caplog.handler)
-        with pytest.raises(RuntimeError):
-            poller.on_poll_timer(None)
+        poller.on_poll_timer(None)
+        worker.run_pending()
 
     assert "SimConnect went away" in caplog.text
 
@@ -152,7 +175,7 @@ class IdleConnection:
 def test_repeated_activity_does_not_defer_a_pending_poll(logger, frame):
     """Answering uplinks faster than the active interval used to restart the
     countdown every time, so the poll that would fetch the reply never ran."""
-    poller = PollingController(logger, IdleConnection(), None)
+    poller, _ = build(logger, IdleConnection())
     poller.start(frame)
 
     poller.set_active_polling()
@@ -167,7 +190,7 @@ def test_repeated_activity_does_not_defer_a_pending_poll(logger, frame):
 def test_an_idle_poll_is_pulled_forward_to_the_active_rate(logger, frame):
     """The point of active mode is a faster reply, so a poll a minute away has
     to come forward when the pilot sends something."""
-    poller = PollingController(logger, IdleConnection(), None)
+    poller, _ = build(logger, IdleConnection())
     poller.start(frame)
     idle_deadline = poller._next_poll_at
 
@@ -202,7 +225,7 @@ def test_a_message_that_speeds_up_polling_mid_tick_still_schedules_once(logger, 
     message = uplink("LSAG", 1, "CLIMB TO AND MAINTAIN FL360", rr=RR.WILCO_UNABLE)
     assert controller(logger).should_increase_polling_rate(message) is True
 
-    poller = PollingController(logger, ClearanceConnection(message))
+    poller, worker = build(logger, ClearanceConnection(message))
     poller.start(frame)
 
     schedule_calls = []
@@ -219,6 +242,7 @@ def test_a_message_that_speeds_up_polling_mid_tick_still_schedules_once(logger, 
     poller.poll_timer.Stop()
 
     poller.on_poll_timer(None)
+    worker.run_pending()
 
     assert len(schedule_calls) == 1
     assert poller.is_active_mode() is True
@@ -247,19 +271,13 @@ def failed(count, reason="timed out", fatal=False):
     return PollResult(ok=False, reason=reason, fatal=fatal, failures=count)
 
 
-def tick(poller):
-    """Run one timer tick the way wx would: the one-shot has already stopped."""
-    poller.poll_timer.Stop()
-    poller.on_poll_timer(None)
-
-
 def test_three_failed_polls_lose_the_link_and_start_the_back_off_ladder(logger, frame):
     """The Jul 17 outage in the maintainer's log lasted six minutes and cleared
     by itself; the old controller would have stopped polling after two."""
     statuses = []
     frame.SetStatusText = statuses.append
     transitions = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(*[failed(count) for count in range(1, 8)]),
         link_callback=lambda old, new, reason: transitions.append((old, new)),
@@ -268,7 +286,7 @@ def test_three_failed_polls_lose_the_link_and_start_the_back_off_ladder(logger, 
 
     intervals = []
     for _ in range(7):
-        tick(poller)
+        tick(poller, worker)
         intervals.append(poller.poll_timer.GetInterval())
 
     assert all(45000 <= interval <= 75000 for interval in intervals[:2])
@@ -290,7 +308,7 @@ def test_a_successful_poll_restores_a_lost_link(logger, frame):
     statuses = []
     frame.SetStatusText = statuses.append
     transitions = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(failed(1), failed(2), failed(3)),
         link_callback=lambda old, new, reason: transitions.append((old, new)),
@@ -298,7 +316,7 @@ def test_a_successful_poll_restores_a_lost_link(logger, frame):
     poller.start(frame)
 
     for _ in range(4):
-        tick(poller)
+        tick(poller, worker)
 
     assert transitions[-1] == (LinkState.LOST, LinkState.CONNECTED)
     assert statuses[-1] == "Connection restored."
@@ -308,14 +326,14 @@ def test_a_successful_poll_restores_a_lost_link(logger, frame):
 
 def test_a_rejected_logon_code_stops_polling_for_good(logger, frame):
     transitions = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(failed(1, "invalid logon code", fatal=True)),
         link_callback=lambda old, new, reason: transitions.append((old, new, reason)),
     )
     poller.start(frame)
 
-    tick(poller)
+    tick(poller, worker)
 
     assert transitions == [(LinkState.CONNECTED, LinkState.FATAL, "invalid logon code")]
     assert poller.is_running() is False
@@ -327,12 +345,12 @@ def test_activity_does_not_shorten_the_back_off_while_the_link_is_lost(logger, f
     # A bare wx.Frame has no status bar; the DEGRADED/LOST ticks below reach
     # _set_status(), which would otherwise raise wxAssertionError.
     frame.SetStatusText = lambda text: None
-    poller = PollingController(
+    poller, worker = build(
         logger, ScriptedConnection(*[failed(count) for count in range(1, 6)])
     )
     poller.start(frame)
     for _ in range(5):
-        tick(poller)
+        tick(poller, worker)
     deadline = poller._next_poll_at
     assert poller.poll_timer.GetInterval() == 120000
 
@@ -350,13 +368,12 @@ def test_a_failing_callback_does_not_lose_the_rest_of_the_batch(logger, frame):
         if message == "FIRST":
             raise RuntimeError("boom")
 
-    poller = PollingController(
+    poller, worker = build(
         logger, ScriptedConnection(PollResult(ok=True, messages=["FIRST", "SECOND"])), callback
     )
     poller.start(frame)
 
-    with pytest.raises(RuntimeError):
-        tick(poller)
+    tick(poller, worker)
 
     assert delivered == ["FIRST", "SECOND"]
     assert poller.is_running() is True
@@ -365,14 +382,14 @@ def test_a_failing_callback_does_not_lose_the_rest_of_the_batch(logger, frame):
 def test_unreadable_uplinks_reach_their_own_callback(logger, frame):
     unreadable = [UnreadableMessage("EDGG", "/data2/6//R/QNH 1013 / TRL 70")]
     received = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(PollResult(ok=True, unreadable=unreadable)),
         unreadable_callback=received.extend,
     )
     poller.start(frame)
 
-    tick(poller)
+    tick(poller, worker)
 
     assert received == unreadable
 
@@ -381,10 +398,10 @@ def test_start_forgets_the_previous_sessions_link_state(logger, frame):
     # A bare wx.Frame has no status bar; the DEGRADED/LOST ticks below reach
     # _set_status(), which would otherwise raise wxAssertionError.
     frame.SetStatusText = lambda text: None
-    poller = PollingController(logger, ScriptedConnection(failed(1), failed(2), failed(3)))
+    poller, worker = build(logger, ScriptedConnection(failed(1), failed(2), failed(3)))
     poller.start(frame)
     for _ in range(3):
-        tick(poller)
+        tick(poller, worker)
     poller.stop()
 
     poller.start(frame)
@@ -393,7 +410,7 @@ def test_start_forgets_the_previous_sessions_link_state(logger, frame):
     assert 45000 <= poller.poll_timer.GetInterval() <= 75000
 
 
-def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
+def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame, caplog):
     """The link callback reaches into the window; a failure there must not
     cost the messages the server has already marked relayed."""
     # A bare wx.Frame has no status bar; the restore transition below reaches
@@ -408,7 +425,7 @@ def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
         if new == LinkState.CONNECTED:
             raise RuntimeError("list control gone")
 
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"])),
         delivered.append,
@@ -417,9 +434,11 @@ def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
     poller.start(frame)
     poller.link.record_poll(failed(3))  # already lost, so the clean poll is a transition
 
-    with pytest.raises(RuntimeError, match="list control gone"):
-        tick(poller)
+    with caplog.at_level(logging.ERROR, logger=logger.name):
+        logger.addHandler(caplog.handler)
+        tick(poller, worker)
 
+    assert "Error in link callback" in caplog.text
     assert delivered == ["CLEARANCE"]
     assert poller.is_running() is True
 
@@ -433,20 +452,20 @@ def test_the_tick_callback_runs_after_every_poll_even_a_failed_one(logger, frame
     # A bare wx.Frame has no status bar; the failed poll reaches _set_status().
     frame.SetStatusText = lambda text: None
     ticks = []
-    poller = PollingController(
+    poller, worker = build(
         logger, ScriptedConnection(failed(1)), tick_callback=lambda: ticks.append(1)
     )
     poller.start(frame)
 
-    tick(poller)
-    tick(poller)
+    tick(poller, worker)
+    tick(poller, worker)
 
     assert len(ticks) == 2
 
 
 def test_the_tick_callback_runs_after_the_batch_is_delivered(logger, frame):
     order = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"])),
         order.append,
@@ -454,7 +473,7 @@ def test_the_tick_callback_runs_after_the_batch_is_delivered(logger, frame):
     )
     poller.start(frame)
 
-    tick(poller)
+    tick(poller, worker)
 
     assert order == ["CLEARANCE", "tick"]
 
@@ -463,13 +482,12 @@ def test_a_raising_tick_callback_still_schedules_the_next_poll(logger, frame, ca
     def tick_callback():
         raise RuntimeError("status bar gone")
 
-    poller = PollingController(logger, ScriptedConnection(), tick_callback=tick_callback)
+    poller, worker = build(logger, ScriptedConnection(), tick_callback=tick_callback)
     poller.start(frame)
 
     with caplog.at_level(logging.ERROR, logger=logger.name):
         logger.addHandler(caplog.handler)
-        with pytest.raises(RuntimeError, match="status bar gone"):
-            tick(poller)
+        tick(poller, worker)
 
     assert "Error in tick callback" in caplog.text
     assert poller.is_running() is True
@@ -479,14 +497,92 @@ def test_the_tick_callback_is_skipped_on_the_tick_that_ends_the_session(logger, 
     """A rejected logon code tears the session down inside the tick; the
     housekeeping that follows a normal tick has nothing left to work on."""
     ticks = []
-    poller = PollingController(
+    poller, worker = build(
         logger,
         ScriptedConnection(failed(1, "invalid logon code", fatal=True)),
         tick_callback=lambda: ticks.append(1),
     )
     poller.start(frame)
 
-    tick(poller)
+    tick(poller, worker)
 
     assert ticks == []
     assert poller.is_running() is False
+
+
+# --- the worker ---------------------------------------------------------------
+
+
+def test_a_poll_runs_on_the_worker_not_in_the_timer_handler(logger, frame):
+    """The GUI thread submits the poll and gets on with the event loop; the
+    result comes back through the worker."""
+    connection = ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"]))
+    delivered = []
+    poller, worker = build(logger, connection, delivered.append)
+    poller.start(frame)
+    poller.poll_timer.Stop()
+
+    poller.on_poll_timer(None)
+
+    assert (connection.polls, delivered, worker.pending()) == (0, [], 1)
+
+    worker.run_pending()
+
+    assert (connection.polls, delivered) == (1, ["CLEARANCE"])
+    assert poller.is_running() is True
+
+
+def test_a_tick_while_a_poll_is_out_does_not_queue_a_second_poll(logger, frame):
+    """A slow server answers in its own time; stacking polls behind it would
+    only add load and confuse the link state. The tick still re-arms the timer."""
+    poller, worker = build(logger, ScriptedConnection())
+    poller.start(frame)
+    poller.poll_timer.Stop()
+    poller.on_poll_timer(None)
+
+    poller.poll_timer.Stop()
+    poller.on_poll_timer(None)
+
+    assert worker.pending() == 1
+    assert poller.is_running() is True
+
+
+def test_a_result_arriving_after_stop_is_ignored(logger, frame):
+    """Disconnect while a poll is out: its answer must neither restart the
+    timer nor reach the window."""
+    delivered = []
+    poller, worker = build(
+        logger, ScriptedConnection(PollResult(ok=True, messages=["LATE"])), delivered.append
+    )
+    poller.start(frame)
+    poller.poll_timer.Stop()
+    poller.on_poll_timer(None)
+    poller.stop()
+
+    worker.run_pending()
+
+    assert delivered == []
+    assert poller.is_running() is False
+
+
+class BrokenConnection:
+    """A poll() that raises, which the real manager never does."""
+
+    def is_connected(self):
+        return True
+
+    def poll(self):
+        raise KeyError("cnx")
+
+
+def test_a_poll_job_that_raises_counts_as_a_failed_poll(logger, frame):
+    """connection_manager.poll() never raises, but a bug there must degrade
+    the link, not stop polling."""
+    frame.SetStatusText = lambda text: None
+    poller, worker = build(logger, BrokenConnection())
+    poller.start(frame)
+
+    tick(poller, worker)
+
+    assert poller.link.state == LinkState.DEGRADED
+    assert poller.is_running() is True
