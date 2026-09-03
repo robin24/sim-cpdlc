@@ -422,3 +422,51 @@ def test_a_failing_link_callback_does_not_lose_the_batch(logger, frame):
 
     assert delivered == ["CLEARANCE"]
     assert poller.is_running() is True
+
+
+# --- the tick callback --------------------------------------------------------
+
+
+def test_the_tick_callback_runs_after_every_poll_even_a_failed_one(logger, frame):
+    """The window gives up on an unanswered logon from here, and an outage
+    must not stop that clock."""
+    # A bare wx.Frame has no status bar; the failed poll reaches _set_status().
+    frame.SetStatusText = lambda text: None
+    ticks = []
+    poller = PollingController(
+        logger, ScriptedConnection(failed(1)), tick_callback=lambda: ticks.append(1)
+    )
+    poller.start(frame)
+
+    tick(poller)
+    tick(poller)
+
+    assert len(ticks) == 2
+
+
+def test_the_tick_callback_runs_after_the_batch_is_delivered(logger, frame):
+    order = []
+    poller = PollingController(
+        logger,
+        ScriptedConnection(PollResult(ok=True, messages=["CLEARANCE"])),
+        order.append,
+        tick_callback=lambda: order.append("tick"),
+    )
+    poller.start(frame)
+
+    tick(poller)
+
+    assert order == ["CLEARANCE", "tick"]
+
+
+def test_a_raising_tick_callback_still_schedules_the_next_poll(logger, frame):
+    def tick_callback():
+        raise RuntimeError("status bar gone")
+
+    poller = PollingController(logger, ScriptedConnection(), tick_callback=tick_callback)
+    poller.start(frame)
+
+    with pytest.raises(RuntimeError, match="status bar gone"):
+        tick(poller)
+
+    assert poller.is_running() is True

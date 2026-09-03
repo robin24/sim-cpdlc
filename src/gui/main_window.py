@@ -117,6 +117,7 @@ class MainWindow(wx.Frame):
             INACTIVITY_TIMEOUT,
             link_callback=self._on_link_change,
             unreadable_callback=self._on_unreadable_messages,
+            tick_callback=self._on_poll_tick,
         )
         # Handle of a scheduled acknowledgement retry, so a disconnect or a
         # fatal teardown can cancel it before it fires against a dead link.
@@ -916,6 +917,13 @@ class MainWindow(wx.Frame):
                 "SYSTEM",
                 play_sound=True,
             )
+
+    def _on_poll_tick(self):
+        """Housekeeping on the poll clock: give up on a logon nobody answered."""
+        station = self.cpdlc_session.expire_pending()
+        if station:
+            self.SetStatusText(f"Logon to {station} not answered.")
+            self._add_custom_message(f"Logon to {station} not answered", "SYSTEM")
 
     def on_pdc_request(self, _):
         """Request a pre-departure clearance from departure airport."""

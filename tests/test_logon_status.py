@@ -5,11 +5,12 @@ with NVDA+End, so a false 'Logged on to X' is the one message a blind pilot
 cannot cross-check.
 """
 
-from tests.support import FakeConnectionManager, make_main_window, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
+from src.config import PENDING_LOGON_TIMEOUT_SECONDS
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
+from tests.support import FakeClock, FakeConnectionManager, make_main_window, uplink
 
 
 def _logon_accepted_from(station, mrn):
@@ -50,3 +51,25 @@ def test_status_bar_is_silent_when_the_mrn_does_not_match(logger):
 
     assert window.status_texts == []
     assert session.get_current_station() == ""
+
+
+def test_an_unanswered_logon_is_given_up_on_and_announced(logger):
+    """Audit L-3: a pending logon never expired, so the status bar said
+    "Pending logon to X." for the rest of the flight."""
+    session = CpdlcSession(logger, FakeConnectionManager(), clock=FakeClock())
+    session.logon("EDDF")
+    window = make_main_window(logger, session, MessageManager(logger))
+
+    window._on_poll_tick()
+    assert window.status_texts == []
+
+    session.clock.advance(PENDING_LOGON_TIMEOUT_SECONDS)
+    window._on_poll_tick()
+    window._on_poll_tick()
+
+    assert window.status_texts == ["Logon to EDDF not answered."]
+    assert session.pending_logon_station is None
+    manager = window.message_manager
+    assert [manager.get_message_display_text(mid) for mid in manager.message_log] == [
+        ("SYSTEM", "Logon to EDDF not answered")
+    ]
