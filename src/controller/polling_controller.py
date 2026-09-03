@@ -189,7 +189,14 @@ class PollingController:
             self._deliver(result)
             self.check_polling_timeout()
             if self.tick_callback:
-                self.tick_callback()
+                try:
+                    self.tick_callback()
+                except Exception as exc:
+                    # Logged like the other callbacks: app.spec builds with
+                    # console=False, so the log file is where this surfaces.
+                    self.logger.exception("Error in tick callback")
+                    if link_error is None:
+                        link_error = exc
             if link_error is not None:
                 raise link_error
         finally:

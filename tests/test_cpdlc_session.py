@@ -290,6 +290,20 @@ def test_only_a_stranger_is_flagged_when_acknowledged(logger, caplog):
     assert flagged == ["Acknowledgement sender EDUU is not part of the dialogue (current station CZYZ)"]
 
 
+def test_logging_off_closes_the_handover_window(logger):
+    """After Requests > Logoff the aircraft talks to nobody; a late CONTACT
+    from the station that handed over must neither tune nor offer a WILCO."""
+    session = build(logger)
+    session.handle_logon_accepted("KUSA")
+    session.handle_handover("KUSA", "CZYZ")
+    session.handle_logon_accepted("CZYZ", mrn=1)
+
+    session.logoff()
+
+    assert session.is_answerable_sender("KUSA") is False
+    assert (session.previous_station, session.previous_station_until) == ("", None)
+
+
 # --- rejection and expiry (audit L-3) -----------------------------------------
 
 

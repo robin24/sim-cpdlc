@@ -199,11 +199,16 @@ class CpdlcSession:
             return False, str(exc)
 
         # Update session state. A logon that was still pending is abandoned
-        # too: the pilot is leaving the dialogue, not waiting on it.
+        # too: the pilot is leaving the dialogue, not waiting on it. The
+        # handover window closes as well, because a pilot who logs off is
+        # talking to nobody: a late uplink from the station that handed over
+        # must stop being answerable.
         previous_station = self.current_station
         self.cpdlc_min_counter += 1
         self.current_station = ""
         self._clear_pending()
+        self.previous_station = ""
+        self.previous_station_until = None
         self.logger.info(f"Successfully logged off from {previous_station}")
         return True, message
 
@@ -467,11 +472,13 @@ class CpdlcSession:
             )
             return False
 
-        # Validate the sender against our pending logon request. The MRN alone
-        # cannot do this: logon() restarts cpdlc_min_counter at 1, so every
-        # pending logon carries MIN 1 and a stale acceptance from a previously
-        # contacted station would match. Only checked when a logon is pending,
-        # so unsolicited acceptances during an automatic handover still apply.
+        # Validate the sender against our pending logon request. The MRN
+        # alone cannot do this: logon() restarts cpdlc_min_counter at 1, so
+        # every pending logon carries MIN 1 and a stale acceptance from a
+        # previously contacted station would match. With nothing pending —
+        # before any logon, or after a rejection or an expiry — an
+        # acceptance is honoured as it stands: a station may log an aircraft
+        # on without a request, and there is nothing to check it against.
         if self.pending_logon_station and station != self.pending_logon_station:
             self.logger.warning(
                 f"LOGON ACCEPTED from {station} does not match pending logon station "

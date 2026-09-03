@@ -456,8 +456,14 @@ class MainWindow(wx.Frame):
                 dlg.Destroy()
                 return
 
+            previous = self.cpdlc_session.get_current_station()
             success, message = self.cpdlc_session.logon(station)
             if success:
+                if previous:
+                    # logon() sent LOGOFF to the previous station before the
+                    # request; the list is the transcript of what went out.
+                    self._add_custom_message("LOGOFF")
+
                 # Add custom message only if a message was returned from the session
                 if message:
                     self._add_custom_message(message)

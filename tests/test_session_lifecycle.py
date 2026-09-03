@@ -196,3 +196,35 @@ def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
     assert window.polling_controller.started is True
     assert window.status_texts == ["Connected as BAW123."]
     assert rows(manager) == [("SYSTEM", "Connected as BAW123")]
+
+
+# --- Requests > Logon ----------------------------------------------------------
+
+
+class FakeLogonDialog:
+    """Stands in for LogonDialog: answers OK with a fixed station, never shows."""
+
+    def __init__(self, parent):
+        pass
+
+    def ShowModal(self):
+        return wx.ID_OK
+
+    def get_logon_details(self):
+        return "EDGG"
+
+    def Destroy(self):
+        pass
+
+
+def test_a_manual_logon_while_logged_on_echoes_the_logoff_it_sends(logger, monkeypatch):
+    """The message list is the transcript of what went out; the LOGOFF that
+    logon() sends first must appear in it like every other frame."""
+    monkeypatch.setattr(mw, "LogonDialog", FakeLogonDialog)
+    window, session, connection, manager = build(logger)
+
+    window.on_logon(None)
+
+    assert [frame[3] for frame in connection.sent] == ["LOGOFF", "REQUEST LOGON"]
+    assert rows(manager) == [(CLIENT_CALLSIGN, "LOGOFF"), (CLIENT_CALLSIGN, "REQUEST LOGON")]
+    assert window.status_texts[-1] == "Pending logon to EDGG."
