@@ -346,8 +346,9 @@ class MainWindow(wx.Frame):
                 self.polling_controller.start(self)
                 self.weather_monitor.start(self)
 
-                # Set callsign in session
-                self.cpdlc_session.set_callsign(callsign)
+                # Hand the identity to the session; a different callsign or
+                # network starts a clean dialogue, the same one keeps the logon
+                self.cpdlc_session.begin_session(callsign, network_type)
 
                 # Update UI
                 self.SetStatusText(f"Connected as {callsign}.")
@@ -388,16 +389,7 @@ class MainWindow(wx.Frame):
 
         self.logger.info("Disconnecting from CPDLC network")
         self._cancel_pending_retry()
-
-        # If logged on to a station, send logoff message first
-        if self.cpdlc_session.is_logged_on():
-            success, message = self.cpdlc_session.send_logoff_message()
-            if success and message:
-                self._add_custom_message(message)
-            self.polling_controller.set_active_polling()
-
-            # Small delay to allow the message to be sent
-            wx.MilliSleep(500)  # 500ms delay
+        self._end_dialogue()
 
         # Stop polling and automatic weather updates
         self.polling_controller.stop()
@@ -414,6 +406,29 @@ class MainWindow(wx.Frame):
 
         # Add system message
         self._add_custom_message("Disconnected from CPDLC network", "SYSTEM")
+
+    def _end_dialogue(self):
+        """Log off from the current station, if any, then forget the dialogue.
+
+        The session is reset whether or not the LOGOFF could be sent: after a
+        disconnect the app must not believe it is still logged on (audit M-1).
+        A LOGOFF that could not be sent gets a SYSTEM row, so the pilot knows
+        the station was not told.
+        """
+        if self.cpdlc_session.is_logged_on():
+            station = self.cpdlc_session.get_current_station()
+            success, message = self.cpdlc_session.logoff()
+            if success:
+                if message:
+                    self._add_custom_message(message)
+            else:
+                error_detail = f": {message}" if message else ""
+                self.logger.warning(f"Could not send LOGOFF to {station}{error_detail}")
+                self._add_custom_message(
+                    f"Could not send LOGOFF to {station}{error_detail}", "SYSTEM"
+                )
+
+        self.cpdlc_session.reset()
 
     def on_logon(self, _):
         """Initiate logon to a CPDLC station."""
@@ -883,10 +898,7 @@ class MainWindow(wx.Frame):
         self.weather_monitor.stop()
         self.weather_monitor.clear()
         self.connection_manager.disconnect()
-        # Package 3 replaces these three lines with CpdlcSession.reset().
-        self.cpdlc_session.current_station = ""
-        self.cpdlc_session.pending_logon_min = None
-        self.cpdlc_session.pending_logon_station = None
+        self.cpdlc_session.reset()
         self.menu_item_connect.SetItemLabel("&Connect")
         self.menu_item_connect.SetHelp("Connect to the CPDLC network")
         self.SetStatusText("Disconnected: logon code rejected.")
@@ -1248,12 +1260,7 @@ class MainWindow(wx.Frame):
 
             self.logger.info("Exit confirmed, performing clean disconnect")
             self._cancel_pending_retry()
-
-            # If logged on to a station, send logoff message first
-            if self.cpdlc_session.is_logged_on():
-                success, message = self.cpdlc_session.send_logoff_message()
-                if success and message:
-                    self._add_custom_message(message)
+            self._end_dialogue()
 
             # Stop polling
             self.polling_controller.stop()

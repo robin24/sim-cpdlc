@@ -207,17 +207,6 @@ class CpdlcSession:
         self.logger.info(f"Successfully logged off from {previous_station}")
         return True, message
 
-    def send_logoff_message(self) -> Tuple[bool, Optional[str]]:
-        """Send a logoff message to the current station.
-
-        Alias for logoff() kept for backward compatibility.
-
-        Returns:
-            tuple: (success, message_text) where success is True if message sent successfully,
-                  and message_text is the message text that was sent (or None if failed)
-        """
-        return self.logoff()
-
     def send_altitude_change_request(
         self, altitude: str, reason: Optional[str] = None
     ) -> Tuple[bool, Optional[str]]:
