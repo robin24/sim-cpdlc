@@ -47,3 +47,15 @@ def test_logon_accepted_with_invalid_station_name_is_rejected(logger):
 
     assert accepted is False
     assert session.get_current_station() == ""
+
+
+def test_logon_accepted_with_a_different_mrn_is_rejected(logger):
+    """TODOS item 24: the MRN must reference our REQUEST LOGON, which always
+    carries MIN 1 because logon() restarts the counter."""
+    session = CpdlcSession(logger, FakeConnectionManager())
+    session.logon("EDDF")
+
+    accepted = session.handle_logon_accepted("EDDF", mrn=2)
+
+    assert accepted is False
+    assert session.get_current_station() == ""
