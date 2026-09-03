@@ -38,6 +38,7 @@ class PollingController:
         poll_interval_range=None,
         link_callback=None,
         unreadable_callback=None,
+        tick_callback=None,
     ):
         """Initialize the polling controller.
 
@@ -56,12 +57,16 @@ class PollingController:
                 link transition, after the status bar has been updated
             unreadable_callback: Callback(list of UnreadableMessage) for
                 uplinks the library could not decode
+            tick_callback: Callback() run at the end of every tick, whatever
+                the poll returned, for housekeeping that keeps the poll's
+                rhythm, such as giving up on an unanswered logon
         """
         self.logger = logger
         self.connection_manager = connection_manager
         self.message_callback = message_callback
         self.link_callback = link_callback
         self.unreadable_callback = unreadable_callback
+        self.tick_callback = tick_callback
         self.default_poll_interval = default_poll_interval
         self.active_poll_interval = active_poll_interval
         self.inactivity_timeout = inactivity_timeout
@@ -183,6 +188,15 @@ class PollingController:
 
             self._deliver(result)
             self.check_polling_timeout()
+            if self.tick_callback:
+                try:
+                    self.tick_callback()
+                except Exception as exc:
+                    # Logged like the other callbacks: app.spec builds with
+                    # console=False, so the log file is where this surfaces.
+                    self.logger.exception("Error in tick callback")
+                    if link_error is None:
+                        link_error = exc
             if link_error is not None:
                 raise link_error
         finally:

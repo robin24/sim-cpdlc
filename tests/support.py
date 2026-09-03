@@ -30,6 +30,15 @@ def uplink(
     return CpdlcMessage(sender, CLIENT_CALLSIGN, min_value, rr, text, mrn)
 
 
+def answerable(*stations):
+    """A sender predicate that answers True for exactly these stations.
+
+    Stands in for CpdlcSession.is_answerable_sender where no session is
+    involved; answerable() with no stations means nobody is logged on.
+    """
+    return lambda sender: sender in stations
+
+
 class FakeConnectionManager:
     """Stands in for ConnectionManager, recording frames instead of transmitting.
 
@@ -50,9 +59,14 @@ class FakeConnectionManager:
         self.info_requests = []
         self.poll_results = []
         self.disconnected = False
+        self.connected_as = None
 
     def is_connected(self):
         return self._connected
+
+    def connect(self, callsign, logon_code, network_type):
+        self._connected = True
+        self.connected_as = (callsign, network_type)
 
     def disconnect(self):
         self._connected = False
@@ -97,6 +111,10 @@ class FakePollingController:
     def __init__(self):
         self.active_calls = 0
         self.stopped = False
+        self.started = False
+
+    def start(self, parent_window):
+        self.started = True
 
     def set_active_polling(self):
         self.active_calls += 1
@@ -134,6 +152,7 @@ class FakeWeatherMonitor:
         self.stopped = False
         self.cleared = False
         self.started = False
+        self.shut_down = False
 
     def start(self, parent_window):
         self.started = True
@@ -143,6 +162,9 @@ class FakeWeatherMonitor:
 
     def clear(self):
         self.cleared = True
+
+    def shutdown(self):
+        self.shut_down = True
 
 
 class FakeMenuItem:
@@ -178,6 +200,37 @@ class FakeCallLater:
 
     def Stop(self):
         self.stopped = True
+
+
+class FakeCloseEvent:
+    """Stands in for the wx.CloseEvent on_close receives."""
+
+    def __init__(self):
+        self.skipped = False
+        self.vetoed = False
+
+    def Skip(self):
+        self.skipped = True
+
+    def Veto(self):
+        self.vetoed = True
+
+
+class FakeClock:
+    """A monotonic clock the test moves by hand, for the session's time windows.
+
+    Args:
+        now: The starting reading, in seconds
+    """
+
+    def __init__(self, now=1000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
 
 
 class MessageBoxes:

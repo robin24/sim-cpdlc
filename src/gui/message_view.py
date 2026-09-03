@@ -14,7 +14,7 @@ class MessageView:
         logger,
         message_manager: MessageManager,
         on_acknowledge,
-        get_current_station,
+        is_answerable_sender,
         on_toggle_weather_updates=None,
         is_weather_watched=None,
     ):
@@ -25,8 +25,10 @@ class MessageView:
             logger: Application logger
             message_manager: Message manager instance
             on_acknowledge: Callback for message acknowledgement
-            get_current_station: Callable returning the station currently
-                logged on, used to scope responses to the live dialogue
+            is_answerable_sender: Callable(station) returning whether a reply
+                to that station is still part of the live dialogue: the
+                current station, or for a while after a handover the one that
+                handed the aircraft over
             on_toggle_weather_updates: Callback(icao, info_type, text) to
                 start or stop automatic updates for a weather report. The text
                 seeds change detection, so re-enabling updates on a report
@@ -38,7 +40,7 @@ class MessageView:
         self.logger = logger
         self.message_manager = message_manager
         self.on_acknowledge = on_acknowledge
-        self.get_current_station = get_current_station
+        self.is_answerable_sender = is_answerable_sender
         self.on_toggle_weather_updates = on_toggle_weather_updates
         self.is_weather_watched = is_weather_watched
 
@@ -130,10 +132,11 @@ class MessageView:
             return
 
         # needs_acknowledgement resolves the ID itself and rejects anything
-        # that is not an unanswered CPDLC message from the current station.
+        # that is not an unanswered CPDLC message from a station still in the
+        # dialogue.
         self.logger.debug(f"Checking message ID={message_id}")
         needs_ack, responses = self.message_manager.needs_acknowledgement(
-            message_id, self.get_current_station()
+            message_id, self.is_answerable_sender
         )
 
         if not needs_ack:

@@ -2,7 +2,7 @@
 
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
-from tests.support import FakeConnectionManager, make_main_window, uplink
+from tests.support import FakeConnectionManager, answerable, make_main_window, uplink
 
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
@@ -13,7 +13,7 @@ STATION = "LSAG"
 def build(logger, connection=None):
     connection = connection if connection is not None else FakeConnectionManager()
     session = CpdlcSession(logger, connection)
-    session.set_callsign("DLH123")
+    session.begin_session("DLH123", "hoppie")
     session.handle_logon_accepted(STATION)
     manager = MessageManager(logger)
     window = make_main_window(logger, session, manager)
@@ -52,7 +52,7 @@ def test_wilco_retires_the_message(logger):
 
     window._on_acknowledge_message(message_id, "WILCO")
 
-    assert manager.needs_acknowledgement(message_id, STATION) == (False, [])
+    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
 
 
 def test_standby_is_sent_but_leaves_the_message_answerable(logger):
@@ -62,7 +62,7 @@ def test_standby_is_sent_but_leaves_the_message_answerable(logger):
     window._on_acknowledge_message(message_id, "STANDBY")
 
     assert connection.sent[-1][3] == "STANDBY"
-    assert manager.needs_acknowledgement(message_id, STATION)[0] is True
+    assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
 
 
 def test_an_unknown_id_sends_nothing_and_tells_the_user(logger):
@@ -94,7 +94,7 @@ def test_a_rate_limited_acknowledgement_is_retried_once_after_five_seconds(logge
 
     assert connection.sent == []
     assert window.status_texts[-1] == "Rate limited - retrying WILCO in 5 s"
-    assert manager.needs_acknowledgement(message_id, STATION)[0] is True
+    assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
     delay, callback, args = window.retries[0]
     assert (delay, args) == (5000, (message_id, "WILCO", True))
 
@@ -102,7 +102,7 @@ def test_a_rate_limited_acknowledgement_is_retried_once_after_five_seconds(logge
     callback(*args)
 
     assert connection.sent[-1][3] == "WILCO"
-    assert manager.needs_acknowledgement(message_id, STATION) == (False, [])
+    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
 
 
 def test_a_second_rate_limit_is_reported_rather_than_retried_again(logger, message_boxes):

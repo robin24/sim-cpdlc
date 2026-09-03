@@ -220,12 +220,13 @@ def test_the_real_window_never_reaches_the_simulator(window):
 
 
 def test_the_real_window_listens_to_its_polling_controller(window):
-    """The link and unreadable callbacks are how a lost link and a dropped
-    uplink reach the message list at all."""
+    """The link, unreadable and tick callbacks are how a lost link, a dropped
+    uplink and an unanswered logon reach the message list at all."""
     controller = window.polling_controller
 
     assert controller.link_callback == window._on_link_change
     assert controller.unreadable_callback == window._on_unreadable_messages
+    assert controller.tick_callback == window._on_poll_tick
 
 
 # --- the message list ---------------------------------------------------------

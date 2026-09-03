@@ -1,39 +1,91 @@
 """CPDLC session management for the client."""
 
 import logging
+import time
 from typing import Optional, Callable, Tuple
 
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
+from src.config import PENDING_LOGON_TIMEOUT_SECONDS, PREVIOUS_STATION_WINDOW_SECONDS
 from src.model.connection_manager import ConnectionManager
 from src.utils.weather_parsing import report_type_label
 
 
 class CpdlcSession:
-    """Manages CPDLC session state and operations."""
+    """Manages CPDLC session state and operations.
 
-    def __init__(self, logger, connection_manager: ConnectionManager):
+    The session knows who the aircraft is talking to: the station logged on,
+    a REQUEST LOGON still waiting for its answer, and for a while after a
+    handover the station that handed the aircraft over, whose late uplinks
+    (typically the CONTACT instruction) are still answerable. reset() forgets
+    all of it; the callsign and network survive, because they identify the
+    aircraft rather than the dialogue.
+    """
+
+    def __init__(
+        self,
+        logger,
+        connection_manager: ConnectionManager,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         """Initialize the CPDLC session.
 
         Args:
             logger: Application logger
             connection_manager: Connection manager instance
+            clock: Returns the current time in seconds. Monotonic, so the
+                session's time windows are not upset by a clock change; tests
+                pass a hand-driven clock.
         """
         self.logger = logger
         self.connection_manager = connection_manager
+        self.clock = clock
+        self.callsign = ""
+        self.network = None
         self.current_station = ""
         self.cpdlc_min_counter = 1
-        self.callsign = ""
         self.pending_logon_min = None
         self.pending_logon_station = None
+        self.pending_logon_at = None
+        self.previous_station = ""
+        self.previous_station_until = None
 
-    def set_callsign(self, callsign: str):
-        """Set the aircraft callsign.
+    def reset(self) -> None:
+        """Forget the ATC dialogue: station, pending logon, handover window, MIN.
+
+        The window calls this on File > Disconnect whether or not the LOGOFF
+        could be sent, on a fatal link error, and (through begin_session) when
+        the aircraft's identity changes. Audit M-1: without it a disconnect
+        left the app believing it was still logged on.
+        """
+        self.current_station = ""
+        self.cpdlc_min_counter = 1
+        self._clear_pending()
+        self.previous_station = ""
+        self.previous_station_until = None
+        self.logger.debug("CPDLC session state reset")
+
+    def begin_session(self, callsign: str, network: Optional[str]) -> None:
+        """Record the identity of a new network connection.
+
+        The network holds the ATC logon by callsign, so reconnecting as the
+        same aircraft on the same network keeps the dialogue; any change of
+        identity starts from a clean one.
 
         Args:
             callsign: The aircraft callsign
+            network: The network type, "hoppie" or "sayintentions"
         """
+        if (callsign, network) != (self.callsign, self.network):
+            self.reset()
         self.callsign = callsign
+        self.network = network
+
+    def _clear_pending(self) -> None:
+        """Forget a REQUEST LOGON that is waiting for its answer."""
+        self.pending_logon_min = None
+        self.pending_logon_station = None
+        self.pending_logon_at = None
 
     def get_callsign(self) -> str:
         """Get the current aircraft callsign.
@@ -62,6 +114,11 @@ class CpdlcSession:
     def logon(self, station: str) -> Tuple[bool, Optional[str]]:
         """Logon to a CPDLC station.
 
+        A station still logged on is sent LOGOFF first, so it learns the
+        dialogue has ended before the next one starts (audit M-7). If that
+        LOGOFF cannot be sent nothing else is: the app never has a dialogue
+        open with two stations, and the pilot retries once the link is back.
+
         Args:
             station: The station to logon to
 
@@ -81,6 +138,12 @@ class CpdlcSession:
             )
             return False, None
 
+        if self.current_station:
+            previous = self.current_station
+            sent, detail = self.logoff()
+            if not sent:
+                return False, f"could not send LOGOFF to {previous}: {detail}"
+
         self.logger.info(f"Attempting to logon to station: {station}")
         self.cpdlc_min_counter = 1
         message = "REQUEST LOGON"
@@ -96,9 +159,11 @@ class CpdlcSession:
             self.logger.error(f"Failed to send logon request to {station}: {exc}")
             return False, str(exc)
 
-        # Track pending logon for MRN validation on LOGON ACCEPTED
+        # Track the pending logon for MRN validation on LOGON ACCEPTED, and
+        # when it was sent so an unanswered request can be given up on
         self.pending_logon_min = self.cpdlc_min_counter
         self.pending_logon_station = station
+        self.pending_logon_at = self.clock()
 
         # Don't set current_station yet, just increment the counter
         self.cpdlc_min_counter += 1
@@ -133,23 +198,19 @@ class CpdlcSession:
             )
             return False, str(exc)
 
-        # Update session state
+        # Update session state. A logon that was still pending is abandoned
+        # too: the pilot is leaving the dialogue, not waiting on it. The
+        # handover window closes as well, because a pilot who logs off is
+        # talking to nobody: a late uplink from the station that handed over
+        # must stop being answerable.
         previous_station = self.current_station
         self.cpdlc_min_counter += 1
         self.current_station = ""
+        self._clear_pending()
+        self.previous_station = ""
+        self.previous_station_until = None
         self.logger.info(f"Successfully logged off from {previous_station}")
         return True, message
-
-    def send_logoff_message(self) -> Tuple[bool, Optional[str]]:
-        """Send a logoff message to the current station.
-
-        Alias for logoff() kept for backward compatibility.
-
-        Returns:
-            tuple: (success, message_text) where success is True if message sent successfully,
-                  and message_text is the message text that was sent (or None if failed)
-        """
-        return self.logoff()
 
     def send_altitude_change_request(
         self, altitude: str, reason: Optional[str] = None
@@ -214,9 +275,10 @@ class CpdlcSession:
             self.logger.error("Cannot send acknowledgement: not connected")
             return False, None
 
-        if self.current_station and sender != self.current_station:
+        if self.current_station and not self.is_answerable_sender(sender):
             self.logger.warning(
-                f"Acknowledgement sender {sender} does not match current station {self.current_station}"
+                f"Acknowledgement sender {sender} is not part of the dialogue "
+                f"(current station {self.current_station})"
             )
 
         self.logger.info(
@@ -410,11 +472,13 @@ class CpdlcSession:
             )
             return False
 
-        # Validate the sender against our pending logon request. The MRN alone
-        # cannot do this: logon() restarts cpdlc_min_counter at 1, so every
-        # pending logon carries MIN 1 and a stale acceptance from a previously
-        # contacted station would match. Only checked when a logon is pending,
-        # so unsolicited acceptances during an automatic handover still apply.
+        # Validate the sender against our pending logon request. The MRN
+        # alone cannot do this: logon() restarts cpdlc_min_counter at 1, so
+        # every pending logon carries MIN 1 and a stale acceptance from a
+        # previously contacted station would match. With nothing pending —
+        # before any logon, or after a rejection or an expiry — an
+        # acceptance is honoured as it stands: a station may log an aircraft
+        # on without a request, and there is nothing to check it against.
         if self.pending_logon_station and station != self.pending_logon_station:
             self.logger.warning(
                 f"LOGON ACCEPTED from {station} does not match pending logon station "
@@ -432,8 +496,7 @@ class CpdlcSession:
 
         self.logger.info(f"Logon accepted by station: {station}")
         self.current_station = station
-        self.pending_logon_min = None
-        self.pending_logon_station = None
+        self._clear_pending()
         return True
 
     def handle_station_logoff(self, station: str) -> None:
@@ -449,6 +512,103 @@ class CpdlcSession:
             self.logger.warning(
                 f"Received LOGOFF from {station} but current station is {self.current_station}"
             )
+
+    def handle_handover(self, old: str, new: str) -> Tuple[bool, Optional[str]]:
+        """Follow a HANDOVER from the current station to the next one.
+
+        The old station keeps answering for a while: in 22 of 163 logged
+        handovers its CONTACT instruction arrived after the handover, in the
+        same poll as the new station's LOGON ACCEPTED. Its uplinks therefore
+        stay answerable for PREVIOUS_STATION_WINDOW_SECONDS. No LOGOFF is
+        sent; the station handing over has ended the dialogue itself.
+
+        Args:
+            old: The station handing over; must be the current station
+            new: The station to log on to
+
+        Returns:
+            logon()'s result, or (False, None) when old is not the current
+            station
+        """
+        if not old or old != self.current_station:
+            self.logger.warning(
+                f"Ignoring handover from {old}: current station is "
+                f"{self.current_station or '(none)'}"
+            )
+            return False, None
+
+        self.logger.info(f"Handover from {old} to {new}")
+        self.previous_station = old
+        self.previous_station_until = self.clock() + PREVIOUS_STATION_WINDOW_SECONDS
+        self.current_station = ""
+        self._clear_pending()
+        return self.logon(new)
+
+    def is_answerable_sender(self, sender: str) -> bool:
+        """Whether an uplink from this station can still be answered.
+
+        True for the current station, and for the station that handed the
+        aircraft over until its window closes. The message list uses this to
+        decide whether to offer responses.
+
+        Args:
+            sender: The station the uplink came from
+        """
+        if not sender:
+            return False
+        if sender == self.current_station:
+            return True
+        return (
+            sender == self.previous_station
+            and self.previous_station_until is not None
+            and self.clock() < self.previous_station_until
+        )
+
+    def handle_logon_rejected(self, station: str, mrn: Optional[int] = None) -> bool:
+        """Handle a station refusing our REQUEST LOGON.
+
+        Covers an explicit LOGON REJECTED and an UNABLE answering the request.
+        Either must come from the station the logon is pending with, and an
+        MRN, when given, must reference the pending request.
+
+        Args:
+            station: The station that answered
+            mrn: The message reference number of the answer, if any
+
+        Returns:
+            bool: True if a pending logon was cancelled, False if the message
+                did not concern one
+        """
+        if not self.pending_logon_station or station != self.pending_logon_station:
+            return False
+        if mrn is not None and mrn != self.pending_logon_min:
+            return False
+
+        self.logger.info(f"Logon to {station} rejected")
+        self._clear_pending()
+        return True
+
+    def expire_pending(self, now: Optional[float] = None) -> Optional[str]:
+        """Give up on a REQUEST LOGON nobody answered.
+
+        Args:
+            now: The current clock reading; taken from the clock when None
+
+        Returns:
+            The station whose pending logon just expired, else None
+        """
+        if self.pending_logon_at is None:
+            return None
+        now = self.clock() if now is None else now
+        if now - self.pending_logon_at < PENDING_LOGON_TIMEOUT_SECONDS:
+            return None
+
+        station = self.pending_logon_station
+        self.logger.warning(
+            f"Logon to {station} not answered within {PENDING_LOGON_TIMEOUT_SECONDS} s"
+        )
+        self._clear_pending()
+        return station
 
     def send_pdc_request(
         self,

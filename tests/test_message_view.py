@@ -3,7 +3,7 @@
 import pytest
 import wx
 
-from tests.support import uplink
+from tests.support import answerable, uplink
 from src.gui.message_view import MessageView
 from src.model.message_manager import MessageManager
 
@@ -18,7 +18,7 @@ def panel(frame):
 
 def build_view(panel, logger, manager, station):
     view = MessageView(
-        panel, logger, manager, lambda *_: None, lambda: station
+        panel, logger, manager, lambda *_: None, answerable(station)
     )
     # PopupMenu runs a nested modal loop, which would hang the test. Shadowing
     # it records that a menu would have been shown.
@@ -29,7 +29,7 @@ def build_view(panel, logger, manager, station):
 
 def test_message_list_is_single_selection(panel, logger):
     """GetFirstSelected is only unambiguous when one row can be selected."""
-    view = MessageView(panel, logger, MessageManager(logger), None, lambda: "")
+    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
 
     assert view.message_list.GetWindowStyleFlag() & wx.LC_SINGLE_SEL
 
@@ -73,7 +73,7 @@ def test_the_weather_menu_hands_back_the_report_it_was_opened_on(panel, logger):
         logger,
         manager,
         lambda *_: None,
-        lambda: STATION,
+        answerable(STATION),
         on_toggle_weather_updates=lambda *args: toggled.append(args),
         is_weather_watched=lambda *_: False,
     )
@@ -98,7 +98,7 @@ def test_the_response_menu_offers_every_response_and_fires_the_chosen_one(panel,
     manager = MessageManager(logger)
     acknowledged = []
     view = MessageView(
-        panel, logger, manager, lambda mid, resp: acknowledged.append((mid, resp)), lambda: STATION
+        panel, logger, manager, lambda mid, resp: acknowledged.append((mid, resp)), answerable(STATION)
     )
     message_id = manager.add_message(uplink(STATION, 4))
     shown = {}
