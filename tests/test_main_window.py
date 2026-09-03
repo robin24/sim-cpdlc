@@ -10,6 +10,7 @@ stripped-down frame; this builds the whole window.
 """
 
 import pytest
+import wx
 
 import src.gui.main_window as mw
 from src.config import DEFAULT_CONFIG, save_config
@@ -19,25 +20,30 @@ from src.model.weather_monitor import WeatherSubscription
 
 MENU_TITLES = ["File", "Requests"]
 
-# wx does not expose which handler a menu item is bound to, so the menus are
-# checked for shape and the handlers are checked for existence by name.
-MENU_HANDLERS = [
-    "on_connect_or_disconnect",
-    "on_settings",
-    "on_check_updates",
-    "on_about",
-    "on_exit",
-    "on_pdc_request",
-    "on_logon",
-    "on_logoff",
-    "on_altitude_change",
-    "on_direct_request",
-    "on_speed_request",
-    "on_when_can_we_expect",
-    "on_telex",
-    "on_weather_request",
-    "on_weather_subscriptions",
-]
+# Which handler each menu item must fire. Every handler is replaced on the
+# class before the window is built, so the Bind() calls in _init_menu pick up
+# the recorders; posting the item's command event then shows which one ran.
+MENU_BINDINGS = {
+    "File": {
+        "Connect": "on_connect_or_disconnect",
+        "Settings": "on_settings",
+        "Check for Updates": "on_check_updates",
+        "About": "on_about",
+        "Exit": "on_exit",
+    },
+    "Requests": {
+        "PDC": "on_pdc_request",
+        "Logon": "on_logon",
+        "Logoff": "on_logoff",
+        "Altitude change": "on_altitude_change",
+        "Direct to": "on_direct_request",
+        "Speed change": "on_speed_request",
+        "When can we expect": "on_when_can_we_expect",
+        "Telex message": "on_telex",
+        "ATIS and Weather request": "on_weather_request",
+        "Automatic weather updates": "on_weather_subscriptions",
+    },
+}
 
 
 @pytest.fixture
@@ -172,19 +178,44 @@ def test_no_mnemonic_collides_within_a_menu_or_the_menu_bar(window):
     assert collisions == {}, f"Menu bar: colliding mnemonic(s) {collisions}"
 
 
-def test_every_menu_item_has_a_handler(window):
-    missing = [
-        name for name in MENU_HANDLERS if not callable(getattr(window, name, None))
-    ]
+def _recorder(name, fired):
+    def handler(self, event):
+        fired.append(name)
 
-    assert missing == []
+    return handler
+
+
+def test_every_menu_item_fires_its_own_handler(build_window, monkeypatch):
+    """A deleted or mis-targeted Bind() shows up as a dead or wrong menu item;
+    checking that the methods merely exist could not see either."""
+    fired = []
+    for names in MENU_BINDINGS.values():
+        for name in names.values():
+            monkeypatch.setattr(mw.MainWindow, name, _recorder(name, fired))
+    window = build_window()
+    menu_bar = window.GetMenuBar()
+
+    observed = {}
+    for menu_index in range(menu_bar.GetMenuCount()):
+        title = menu_bar.GetMenuLabel(menu_index).replace("&", "")
+        for item in menu_bar.GetMenu(menu_index).GetMenuItems():
+            if item.IsSeparator():
+                continue
+            fired.clear()
+            window.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, item.GetId()))
+            observed.setdefault(title, {})[item.GetItemLabelText()] = (
+                fired[0] if len(fired) == 1 else list(fired)
+            )
+
+    assert observed == MENU_BINDINGS
 
 
 # --- guards -------------------------------------------------------------------
 
 
-def test_a_request_needing_a_connection_is_refused_while_disconnected(window):
+def test_a_request_needing_a_connection_is_refused_and_the_user_is_told(window, message_boxes):
     assert window._require_connection("test") is False
+    assert message_boxes.captions == ["Not Connected"]
 
 
 # --- the message list ---------------------------------------------------------
