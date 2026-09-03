@@ -12,7 +12,7 @@ stripped-down frame; this builds the whole window.
 import pytest
 
 import src.gui.main_window as mw
-from src.config import DEFAULT_CONFIG
+from src.config import DEFAULT_CONFIG, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
@@ -41,34 +41,32 @@ MENU_HANDLERS = [
 
 
 @pytest.fixture
-def window(logger, wx_app, monkeypatch):
-    """The real window, kept offline and non-modal.
+def build_window(logger, wx_app, isolated_config, message_boxes):
+    """A factory for the real window, kept offline and non-modal.
 
-    Three things in __init__ would otherwise stop a test run dead:
-
-    - _check_first_launch() opens a welcome dialog and blocks on ShowModal
-      whenever no config file exists, which is the case on any CI runner and
-      any fresh machine. It also writes a config file into the real user data
-      directory, which a test has no business doing.
-    - the update check reaches the network.
-    - a missing sound file, and the guards under test, open a message box.
-
-    The config is stubbed to the defaults rather than read from disk, so the
-    window under test does not vary with whatever the developer happens to
-    have configured.
+    The isolated config file is written first, so _check_first_launch() finds
+    it and shows no welcome dialog, and the update check is switched off so no
+    background thread starts. Every window built here is destroyed at teardown.
     """
-    monkeypatch.setattr(mw.MainWindow, "_check_first_launch", lambda self: None)
-    monkeypatch.setattr(
-        mw, "load_config", lambda: {**DEFAULT_CONFIG, "auto_check_updates": False}
-    )
-    monkeypatch.setattr(mw.wx, "MessageBox", lambda *args, **kwargs: None)
+    built = []
 
-    window = mw.MainWindow(None, "Sim-CPDLC test", logger)
-    window.Hide()
-    yield window
-    window.weather_monitor.clear()
-    window.weather_monitor.shutdown()
-    window.Destroy()
+    def build():
+        assert save_config({**DEFAULT_CONFIG, "auto_check_updates": False})
+        window = mw.MainWindow(None, "Sim-CPDLC test", logger)
+        window.Hide()
+        built.append(window)
+        return window
+
+    yield build
+    for window in built:
+        window.weather_monitor.clear()
+        window.weather_monitor.shutdown()
+        window.Destroy()
+
+
+@pytest.fixture
+def window(build_window):
+    return build_window()
 
 
 def last_row(window):
