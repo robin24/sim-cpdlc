@@ -286,6 +286,18 @@ class MessageManager:
         self.acknowledged_messages.add(message_id)
         self.logger.debug(f"Marked message as acknowledged: ID={message_id}")
 
+    def is_acknowledged(self, message_id: int) -> bool:
+        """Check whether a message has been answered for good.
+
+        Args:
+            message_id: The message ID
+
+        Returns:
+            bool: True once a terminal response was sent for it; STANDBY does
+                not count, because the message is still waiting for its answer
+        """
+        return message_id in self.acknowledged_messages
+
     def needs_acknowledgement(
         self, message_id: int, current_station: str
     ) -> Tuple[bool, List[str]]:

@@ -115,3 +115,20 @@ def test_a_second_rate_limit_is_reported_rather_than_retried_again(logger, messa
     assert window.retries == []
     assert message_boxes.captions == ["Error"]
     assert "rate_limit" in message_boxes.calls[0][0]
+
+
+def test_a_retry_is_dropped_when_the_message_was_answered_in_the_meantime(logger):
+    """Rate-limited WILCO, then the pilot picks UNABLE before the retry fires:
+    the stale WILCO must not follow the UNABLE onto the link."""
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+    window._on_acknowledge_message(message_id, "WILCO")
+    _, callback, args = window.retries[0]
+
+    connection.raise_with = None
+    window._on_acknowledge_message(message_id, "UNABLE")
+    callback(*args)
+
+    assert [frame[3] for frame in connection.sent] == ["UNABLE"]
+    assert window.status_texts[-1] == "Delayed WILCO not sent: the message was already answered."

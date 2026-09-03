@@ -1121,7 +1121,8 @@ class MainWindow(wx.Frame):
             message_id: The ID of the message being acknowledged
             response: The response text
             retried: True when this is the automatic second attempt after a
-                rate_limit answer, which is not retried again
+                rate_limit answer, which is not retried again. A retry is
+                dropped if the message was answered for good in the meantime.
         """
         addressing = self.message_manager.get_cpdlc_addressing(message_id)
         if addressing is None:
@@ -1130,6 +1131,15 @@ class MainWindow(wx.Frame):
             return
 
         sender, min_value = addressing
+
+        if retried and self.message_manager.is_acknowledged(message_id):
+            # The pilot answered this message another way while the retry was
+            # pending; sending the stale response now would contradict it.
+            self.logger.info(
+                f"Delayed {response} for message ID {message_id} not sent: already answered"
+            )
+            self.SetStatusText(f"Delayed {response} not sent: the message was already answered.")
+            return
 
         success, returned_message = self.cpdlc_session.send_acknowledgement(
             sender, min_value, response
