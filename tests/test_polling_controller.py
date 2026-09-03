@@ -327,11 +327,14 @@ def test_activity_does_not_shorten_the_back_off_while_the_link_is_lost(logger, f
     # A bare wx.Frame has no status bar; the DEGRADED/LOST ticks below reach
     # _set_status(), which would otherwise raise wxAssertionError.
     frame.SetStatusText = lambda text: None
-    poller = PollingController(logger, ScriptedConnection(failed(1), failed(2), failed(3)))
+    poller = PollingController(
+        logger, ScriptedConnection(*[failed(count) for count in range(1, 6)])
+    )
     poller.start(frame)
-    for _ in range(3):
+    for _ in range(5):
         tick(poller)
     deadline = poller._next_poll_at
+    assert poller.poll_timer.GetInterval() == 120000
 
     poller.set_active_polling()
 
