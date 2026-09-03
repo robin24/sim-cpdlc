@@ -111,6 +111,17 @@ INACTIVITY_TIMEOUT = 300000  # 5 minutes
 # Maximum connection failures before attempting reconnection
 MAX_CONNECTION_FAILURES = 3
 
+# Once the link is lost (MAX_CONNECTION_FAILURES consecutive failed polls) the
+# next polls wait these long, in order, staying on the last value until a poll
+# succeeds. Polling never stops on its own: a six-minute outage must not end
+# the session.
+LINK_BACKOFF_MS = (20000, 60000, 120000, 300000)
+
+# SayIntentions answers "rate_limit" to a second message sent within a few
+# seconds of the first. A rate-limited acknowledgement is retried once after
+# this delay.
+RATE_LIMIT_RETRY_MS = 5000
+
 # Automatic weather updates. The interval is a re-request on a timer rather
 # than a push from the network, so keep it gentle on the ACARS servers.
 DEFAULT_WEATHER_INTERVAL_MINUTES = 5
