@@ -3,7 +3,7 @@
 import pytest
 import wx
 
-from conftest import uplink
+from tests.support import uplink
 from src.gui.message_view import MessageView
 from src.model.message_manager import MessageManager
 
@@ -88,3 +88,34 @@ def test_the_weather_menu_hands_back_the_report_it_was_opened_on(panel, logger):
     view.on_context_menu(None)
 
     assert toggled == [("EGLL", "metar", text)]
+
+
+def test_the_response_menu_offers_every_response_and_fires_the_chosen_one(panel, logger):
+    """The menu is destroyed as soon as it closes, so its items are captured
+    inside the fake PopupMenu; the second item is chosen from there. TODOS
+    item 2: the per-item bindings must be gone once the menu has closed, or a
+    reused id would fire a stale response."""
+    manager = MessageManager(logger)
+    acknowledged = []
+    view = MessageView(
+        panel, logger, manager, lambda mid, resp: acknowledged.append((mid, resp)), lambda: STATION
+    )
+    message_id = manager.add_message(uplink(STATION, 4))
+    shown = {}
+
+    def choose_second(menu):
+        shown["labels"] = [item.GetItemLabelText() for item in menu.GetMenuItems()]
+        shown["ids"] = [item.GetId() for item in menu.GetMenuItems()]
+        panel.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, shown["ids"][1]))
+
+    panel.PopupMenu = choose_second
+    view.add_message(message_id)
+    view.message_list.Select(0)
+
+    view.on_context_menu(None)
+
+    assert shown["labels"] == ["Respond: WILCO", "Respond: UNABLE", "Respond: STANDBY"]
+    assert acknowledged == [(message_id, "UNABLE")]
+
+    panel.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, shown["ids"][1]))
+    assert acknowledged == [(message_id, "UNABLE")], "binding survived the menu"

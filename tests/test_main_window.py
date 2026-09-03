@@ -10,65 +10,76 @@ stripped-down frame; this builds the whole window.
 """
 
 import pytest
+import wx
 
 import src.gui.main_window as mw
-from src.config import DEFAULT_CONFIG
+from src.config import DEFAULT_CONFIG, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
+from tests.support import FakeSimConnectManager
 
-MENU_TITLES = ["File", "Requests"]
+# Which handler each menu item must fire. Every handler is replaced on the
+# class before the window is built, so the Bind() calls in _init_menu pick up
+# the recorders; posting the item's command event then shows which one ran.
+MENU_BINDINGS = {
+    "File": {
+        "Connect": "on_connect_or_disconnect",
+        "Settings": "on_settings",
+        "Check for Updates": "on_check_updates",
+        "About": "on_about",
+        "Exit": "on_exit",
+    },
+    "Requests": {
+        "PDC": "on_pdc_request",
+        "Logon": "on_logon",
+        "Logoff": "on_logoff",
+        "Altitude change": "on_altitude_change",
+        "Direct to": "on_direct_request",
+        "Speed change": "on_speed_request",
+        "When can we expect": "on_when_can_we_expect",
+        "Telex message": "on_telex",
+        "ATIS and Weather request": "on_weather_request",
+        "Automatic weather updates": "on_weather_subscriptions",
+    },
+}
 
-# wx does not expose which handler a menu item is bound to, so the menus are
-# checked for shape and the handlers are checked for existence by name.
-MENU_HANDLERS = [
-    "on_connect_or_disconnect",
-    "on_settings",
-    "on_check_updates",
-    "on_about",
-    "on_exit",
-    "on_pdc_request",
-    "on_logon",
-    "on_logoff",
-    "on_altitude_change",
-    "on_direct_request",
-    "on_speed_request",
-    "on_when_can_we_expect",
-    "on_telex",
-    "on_weather_request",
-    "on_weather_subscriptions",
-]
+MENU_TITLES = list(MENU_BINDINGS)
 
 
 @pytest.fixture
-def window(logger, wx_app, monkeypatch):
-    """The real window, kept offline and non-modal.
+def build_window(logger, wx_app, isolated_config, message_boxes):
+    """A factory for the real window, kept offline and non-modal.
 
-    Three things in __init__ would otherwise stop a test run dead:
-
-    - _check_first_launch() opens a welcome dialog and blocks on ShowModal
-      whenever no config file exists, which is the case on any CI runner and
-      any fresh machine. It also writes a config file into the real user data
-      directory, which a test has no business doing.
-    - the update check reaches the network.
-    - a missing sound file, and the guards under test, open a message box.
-
-    The config is stubbed to the defaults rather than read from disk, so the
-    window under test does not vary with whatever the developer happens to
-    have configured.
+    The isolated config file is written first, so _check_first_launch() finds
+    it and shows no welcome dialog, and the update check is switched off so no
+    background thread starts. Every window built here is destroyed at teardown.
     """
-    monkeypatch.setattr(mw.MainWindow, "_check_first_launch", lambda self: None)
-    monkeypatch.setattr(
-        mw, "load_config", lambda: {**DEFAULT_CONFIG, "auto_check_updates": False}
-    )
-    monkeypatch.setattr(mw.wx, "MessageBox", lambda *args, **kwargs: None)
+    built = []
 
-    window = mw.MainWindow(None, "Sim-CPDLC test", logger)
-    window.Hide()
-    yield window
-    window.weather_monitor.clear()
-    window.weather_monitor.shutdown()
-    window.Destroy()
+    def build():
+        # Writing the config file first keeps _check_first_launch() from
+        # asking anything at all; the message_dialogs recorder is the safety
+        # net if that ever stops being true.
+        assert save_config({**DEFAULT_CONFIG, "auto_check_updates": False})
+        window = mw.MainWindow(None, "Sim-CPDLC test", logger)
+        window.Hide()
+        # A real SimConnectManager would try to reach a running MSFS; swap in
+        # the fake so a CONTACT uplink through this window tunes nothing.
+        window.simconnect_manager = FakeSimConnectManager()
+        built.append(window)
+        return window
+
+    yield build
+    for window in built:
+        window.weather_monitor.clear()
+        window.weather_monitor.shutdown()
+        window.Destroy()
+
+
+@pytest.fixture
+def window(build_window):
+    return build_window()
 
 
 def last_row(window):
@@ -98,18 +109,7 @@ def test_the_requests_menu_carries_every_request(window):
 
     labels = [item.GetItemLabelText() for item in requests.GetMenuItems()]
 
-    assert labels == [
-        "PDC",
-        "Logon",
-        "Logoff",
-        "Altitude change",
-        "Direct to",
-        "Speed change",
-        "When can we expect",
-        "Telex message",
-        "ATIS and Weather request",
-        "Automatic weather updates",
-    ]
+    assert labels == list(MENU_BINDINGS["Requests"])
 
 
 def _mnemonic(label):
@@ -174,19 +174,49 @@ def test_no_mnemonic_collides_within_a_menu_or_the_menu_bar(window):
     assert collisions == {}, f"Menu bar: colliding mnemonic(s) {collisions}"
 
 
-def test_every_menu_item_has_a_handler(window):
-    missing = [
-        name for name in MENU_HANDLERS if not callable(getattr(window, name, None))
-    ]
+def _recorder(name, fired):
+    def handler(self, event):
+        fired.append(name)
 
-    assert missing == []
+    return handler
+
+
+def test_every_menu_item_fires_its_own_handler(build_window, monkeypatch):
+    """A deleted or mis-targeted Bind() shows up as a dead or wrong menu item;
+    checking that the methods merely exist could not see either."""
+    fired = []
+    for names in MENU_BINDINGS.values():
+        for name in names.values():
+            monkeypatch.setattr(mw.MainWindow, name, _recorder(name, fired))
+    window = build_window()
+    menu_bar = window.GetMenuBar()
+
+    observed = {}
+    for menu_index in range(menu_bar.GetMenuCount()):
+        title = menu_bar.GetMenuLabel(menu_index).replace("&", "")
+        for item in menu_bar.GetMenu(menu_index).GetMenuItems():
+            if item.IsSeparator():
+                continue
+            fired.clear()
+            window.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, item.GetId()))
+            observed.setdefault(title, {})[item.GetItemLabelText()] = (
+                fired[0] if len(fired) == 1 else list(fired)
+            )
+
+    assert observed == MENU_BINDINGS
 
 
 # --- guards -------------------------------------------------------------------
 
 
-def test_a_request_needing_a_connection_is_refused_while_disconnected(window):
+def test_a_request_needing_a_connection_is_refused_and_the_user_is_told(window, message_boxes):
     assert window._require_connection("test") is False
+    assert message_boxes.captions == ["Not Connected"]
+
+
+def test_the_real_window_never_reaches_the_simulator(window):
+    """A CONTACT uplink through this fixture must tune the fake, not MSFS."""
+    assert isinstance(window.simconnect_manager, FakeSimConnectManager)
 
 
 # --- the message list ---------------------------------------------------------

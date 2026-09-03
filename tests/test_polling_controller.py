@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from conftest import FakeConnectionManager, uplink
+from tests.support import FakeConnectionManager, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.controller.polling_controller import PollingController

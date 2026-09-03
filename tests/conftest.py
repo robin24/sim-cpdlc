@@ -1,12 +1,20 @@
-"""Shared fixtures for the sim-cpdlc test suite."""
+"""Shared fixtures for the sim-cpdlc test suite.
+
+Helpers and test doubles live in tests/support.py; this file holds fixtures
+only. The autouse fixtures make the suite hermetic: whatever a test builds, it
+cannot read or write the real configuration file, reach the network, call
+SimBrief or block on a message box.
+"""
 
 import logging
+import webbrowser
 
 import pytest
+import requests
 import wx
-from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
 
-CLIENT_CALLSIGN = "DLH123"
+from tests.support import MessageBoxes, MessageDialogs
+from src import config as config_module
 
 
 @pytest.fixture
@@ -16,6 +24,86 @@ def logger():
     log.handlers = [logging.NullHandler()]
     log.propagate = False
     return log
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(monkeypatch, tmp_path):
+    """Point the configuration file at a per-test temporary path.
+
+    load_config(), save_config() and MainWindow._check_first_launch() all read
+    src.config.CONFIG_FILE at call time, so one patch covers every path that
+    could otherwise touch the developer's real config.json.
+
+    Returns:
+        str: Path of the isolated config file, which may not exist yet.
+    """
+    path = tmp_path / "config.json"
+    monkeypatch.setattr(config_module, "CONFIG_FILE", str(path))
+    return str(path)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Refuse every outbound request a test did not explicitly fake.
+
+    Tests that need HTTP install their own fake over these (see serving() in
+    test_connection_manager.py); a test's own monkeypatch runs after this one.
+    """
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("network access in a test")
+
+    monkeypatch.setattr(requests, "get", refuse)
+    monkeypatch.setattr(requests, "post", refuse)
+    monkeypatch.setattr(requests, "request", refuse)
+    monkeypatch.setattr(requests.Session, "request", refuse)
+    monkeypatch.setattr(webbrowser, "open", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_simbrief(monkeypatch):
+    """Answer every SimBrief lookup with "no flight plan", recording the ids asked for.
+
+    The Connect and PDC dialogs import get_latest_ofp by name, so the patch
+    lands on each dialog module rather than on src.utils.simbrief.
+
+    Returns:
+        list: The SimBrief user ids the dialogs asked for.
+    """
+    asked = []
+
+    def fake(user_id):
+        asked.append(user_id)
+        return None
+
+    monkeypatch.setattr("src.gui.dialogs.connect_dialog.get_latest_ofp", fake)
+    monkeypatch.setattr("src.gui.dialogs.pdc_dialog.get_latest_ofp", fake)
+    return asked
+
+
+@pytest.fixture(autouse=True)
+def message_boxes(monkeypatch):
+    """Replace wx.MessageBox with a recorder so no test can block on a modal.
+
+    Every module calls it as wx.MessageBox, so patching the wx module attribute
+    covers them all. Set .answer to wx.NO to take the cancel branch of a
+    confirmation.
+    """
+    recorder = MessageBoxes()
+    monkeypatch.setattr(wx, "MessageBox", recorder)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def message_dialogs(monkeypatch):
+    """Replace wx.MessageDialog with a recorder so no test can block on one.
+
+    _check_first_launch() opens a MessageDialog whenever the config file is
+    missing, which is the default state of the isolated config.
+    """
+    recorder = MessageDialogs()
+    monkeypatch.setattr(wx, "MessageDialog", recorder)
+    return recorder
 
 
 @pytest.fixture
@@ -32,7 +120,9 @@ def wx_app():
     # monitor, a SimConnect manager and an update checker -- stays alive for
     # the rest of the session.
     wx.SafeYield()
+    leaked = [type(window).__name__ for window in wx.GetTopLevelWindows()]
     app.Destroy()
+    assert leaked == [], f"top-level windows leaked by this test: {leaked}"
 
 
 @pytest.fixture
@@ -41,75 +131,3 @@ def frame(wx_app):
     frame = wx.Frame(None)
     yield frame
     frame.Destroy()
-
-
-def uplink(sender, min_value, text="CLIMB TO AND MAINTAIN FL360", rr=RR.WILCO_UNABLE):
-    """Build an uplink CpdlcMessage as it would arrive from a station."""
-    return CpdlcMessage(sender, CLIENT_CALLSIGN, min_value, rr, text)
-
-
-class FakeConnectionManager:
-    """Stands in for ConnectionManager, recording frames instead of transmitting.
-
-    ConnectionManager is the network boundary and is injected into CpdlcSession,
-    so this is the intended seam rather than a mock of code under test.
-    """
-
-    def __init__(self, connected=True):
-        self._connected = connected
-        self.sent = []
-        self.info_requests = []
-
-    def is_connected(self):
-        return self._connected
-
-    def send_cpdlc(self, recipient, min_value, response_type, message, mrn=None):
-        self.sent.append((recipient, min_value, response_type, message, mrn))
-
-    def send_info_request(self, info_type, icao):
-        self.info_requests.append((info_type, icao))
-        return f"{icao} REPORT FOR {info_type}"
-
-
-class RecordingMessageView:
-    """Captures the message IDs the window pushes into the list view."""
-
-    def __init__(self):
-        self.added = []
-
-    def add_message(self, message_id):
-        self.added.append(message_id)
-
-
-class FakePollingController:
-    """Records polling-rate changes without owning a wx.Timer."""
-
-    def __init__(self):
-        self.active_calls = 0
-
-    def set_active_polling(self):
-        self.active_calls += 1
-
-
-def make_main_window(logger, cpdlc_session, message_manager):
-    """Build a MainWindow whose wx.Frame half is never initialised.
-
-    MainWindow.__init__ opens dialogs, loads sounds and starts an update check,
-    none of which a unit test should trigger. Allocating the instance and wiring
-    only the collaborators the message path touches lets the real
-    _on_message_received / _on_acknowledge_message code run unmodified.
-    """
-    from src.gui.main_window import MainWindow
-
-    window = MainWindow.__new__(MainWindow)
-    window.logger = logger
-    window.cpdlc_session = cpdlc_session
-    window.message_manager = message_manager
-    window.message_view = RecordingMessageView()
-    window.polling_controller = FakePollingController()
-    window.new_message_sound = None
-    window.status_texts = []
-    # Instance attribute shadows wx.Frame.SetStatusText, which would need a
-    # live C++ frame behind it.
-    window.SetStatusText = window.status_texts.append
-    return window

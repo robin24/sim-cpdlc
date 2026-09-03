@@ -9,7 +9,7 @@ here rather than at application startup.
 import pytest
 import wx
 
-from conftest import FakeConnectionManager, uplink
+from tests.support import FakeConnectionManager, uplink
 from src.gui.main_window import MainWindow
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager

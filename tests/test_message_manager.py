@@ -1,6 +1,8 @@
 """Tests for message identity, acknowledgement state and response options."""
 
-from conftest import uplink
+import pytest
+
+from tests.support import uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.model.message_manager import MessageManager
@@ -129,3 +131,26 @@ def test_a_weather_report_reaches_the_reader_without_separators(logger):
     assert "@" not in row
     assert "@" not in detail
     assert detail == "ATIS EGLL\n\nEGLL ATIS INFO K\nRWY IN USE 27R"
+
+
+RESPONSE_TABLE = [
+    (RR.WILCO_UNABLE, ["WILCO", "UNABLE", "STANDBY"]),
+    (RR.AFFIRM_NEGATIVE, ["AFFIRM", "NEGATIVE", "STANDBY"]),
+    (RR.ROGER, ["ROGER", "STANDBY"]),
+    (RR.YES, ["YES", "NO"]),
+    (RR.NO, []),
+    (RR.NOT_REQUIRED, []),
+]
+
+
+def test_the_response_table_covers_every_requirement_code():
+    assert {rr for rr, _ in RESPONSE_TABLE} == set(RR)
+
+
+@pytest.mark.parametrize("rr, expected", RESPONSE_TABLE, ids=[rr.name for rr, _ in RESPONSE_TABLE])
+def test_the_responses_offered_for_each_requirement_code(logger, rr, expected):
+    """TODOS item 22: "Y" once offered only YES, and "N" wrongly offered NO."""
+    manager = MessageManager(logger)
+    message_id = manager.add_message(uplink(STATION, 9, "CONFIRM SQUAWK", rr=rr))
+
+    assert manager.needs_acknowledgement(message_id, STATION) == (bool(expected), expected)

@@ -14,7 +14,7 @@ import logging
 
 import pytest
 import requests
-from hoppie_connector import HoppieConnector, HoppieError
+from hoppie_connector import CpdlcResponseRequirement as RR, HoppieConnector, HoppieError
 
 from src.config import HOPPIE_API_URL, SAYINTENTIONS_API_URL
 from src.model.connection_manager import (
@@ -295,6 +295,24 @@ def test_a_rejected_message_is_not_counted_as_a_link_failure(logger, monkeypatch
     assert cm.should_attempt_reconnection() is False
 
 
+def test_an_acknowledgement_is_transmitted_as_data2_min_mrn_n_text(logger, monkeypatch):
+    """The literal packet the station's client parses. Built by the real
+    hoppie_connector, captured at the HTTP boundary."""
+    seen = {}
+
+    def _get(url, params=None, **kwargs):
+        seen.update(params or {})
+        return FakeResponse("ok")
+
+    cm = connected(logger, monkeypatch)
+    monkeypatch.setattr(requests, "get", _get)
+
+    cm.send_cpdlc("LSAG", 1, RR.NO.value, "WILCO", mrn=53)
+
+    assert seen["packet"] == "/data2/1/53/N/WILCO"
+    assert (seen["to"], seen["type"], seen["from"]) == ("LSAG", "cpdlc", "DLH123")
+
+
 # --- session state ------------------------------------------------------------
 
 
@@ -412,26 +430,31 @@ def test_install_request_timeout_supplies_a_default(monkeypatch):
     sock.settimeout(None) when given no timeout."""
     seen = {}
 
-    def _get(url, **kwargs):
+    def _request(url, **kwargs):
         seen.update(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests, "get", _request)
+    monkeypatch.setattr(requests, "post", _request)
     install_request_timeout(7)
 
     requests.get("https://example.invalid/")
+    assert seen["timeout"] == 7
 
+    seen.clear()
+    requests.post("https://example.invalid/")
     assert seen["timeout"] == 7
 
 
 def test_an_explicit_timeout_still_wins(monkeypatch):
     seen = {}
 
-    def _get(url, **kwargs):
+    def _request(url, **kwargs):
         seen.update(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests, "get", _request)
+    monkeypatch.setattr(requests, "post", _request)
     install_request_timeout(7)
 
     requests.get("https://example.invalid/", timeout=1)
