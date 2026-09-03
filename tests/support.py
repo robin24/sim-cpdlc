@@ -252,6 +252,11 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.new_message_sound = FakeSound()
     # wx.CallAfter needs a running wx.App; run deferred callbacks at once.
     window._defer = lambda callback, *args, **kwargs: callback(*args, **kwargs)
+    # wx.CallLater needs a running wx.App; record delayed callbacks instead.
+    window.retries = []
+    window._retry_later = lambda delay_ms, callback, *args: window.retries.append(
+        (delay_ms, callback, args)
+    )
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.

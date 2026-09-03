@@ -18,6 +18,7 @@ from src.config import (
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
     MESSAGE_SOUND_FILENAME,
+    RATE_LIMIT_RETRY_MS,
     weather_interval_minutes,
     load_config,
     save_config,
@@ -806,6 +807,10 @@ class MainWindow(wx.Frame):
         """
         wx.CallAfter(callback, *args, **kwargs)
 
+    def _retry_later(self, delay_ms, callback, *args):
+        """Run a callback once after a delay, on the event loop."""
+        wx.CallLater(delay_ms, callback, *args)
+
     def _on_link_change(self, old_state, new_state, reason):
         """Announce the link transitions the status bar alone would hide.
 
@@ -1109,12 +1114,14 @@ class MainWindow(wx.Frame):
                                     f"Auto-tune failed \u2014 set {freq:.3f} manually"
                                 )
 
-    def _on_acknowledge_message(self, message_id: int, response: str):
+    def _on_acknowledge_message(self, message_id: int, response: str, retried=False):
         """Handle message acknowledgement.
 
         Args:
             message_id: The ID of the message being acknowledged
             response: The response text
+            retried: True when this is the automatic second attempt after a
+                rate_limit answer, which is not retried again
         """
         addressing = self.message_manager.get_cpdlc_addressing(message_id)
         if addressing is None:
@@ -1138,6 +1145,17 @@ class MainWindow(wx.Frame):
 
             # Set active polling
             self.polling_controller.set_active_polling()
+        elif not retried and returned_message and "rate_limit" in returned_message.lower():
+            # SayIntentions refuses a second message sent within a few seconds
+            # of the first. One automatic retry covers the common case of two
+            # quick acknowledgements; a second refusal is reported like any
+            # other failure.
+            seconds = RATE_LIMIT_RETRY_MS // 1000
+            self.logger.warning(f"Rate limited sending {response}; retrying in {seconds} s")
+            self.SetStatusText(f"Rate limited - retrying {response} in {seconds} s")
+            self._retry_later(
+                RATE_LIMIT_RETRY_MS, self._on_acknowledge_message, message_id, response, True
+            )
         else:
             error_detail = f": {returned_message}" if returned_message else ""
             wx.MessageBox(
