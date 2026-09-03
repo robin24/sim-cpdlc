@@ -32,7 +32,7 @@ TRANSPORT_ERRORS = (ConnectionError, TimeoutError, requests.RequestException)
 PROTOCOL_ERRORS = (ValueError, TypeError)
 
 _LOGON_PATTERN = re.compile(r"(logon=)[^&\s]+", re.IGNORECASE)
-_SERVER_INFO_PATTERN = re.compile(r"^\{server info \{(.+)\}\}$", re.DOTALL)
+_SERVER_INFO_PATTERN = re.compile(r"^\{server info \{(.*)\}\}$", re.DOTALL)
 
 
 def install_request_timeout(timeout=NETWORK_TIMEOUT):
@@ -474,16 +474,18 @@ class ConnectionManager:
 
         body = response.text.strip()
 
-        if body.startswith("ok "):
-            text = body[3:].strip()
-            # Response is wrapped as {server info {actual text}} — extract inner content
+        if body == "ok" or body.startswith("ok "):
+            text = body[2:].strip()
+            # The report is wrapped as {server info {actual text}}; a station
+            # with nothing to report answers with an empty envelope, or with a
+            # bare "ok", both of which come back as "" for the caller to name.
             match = _SERVER_INFO_PATTERN.match(text)
             if match:
                 text = match.group(1).strip()
             self.logger.info(f"Received {label} for {icao}")
             return text
-        elif body.startswith("error "):
-            error_reason = body[6:].strip()
+        elif body.startswith("error"):
+            error_reason = body[5:].strip().strip("{}").strip()
             self.logger.error(f"{label} request error: {error_reason}")
             raise HoppieError(f"{label} request error: {error_reason}")
         else:

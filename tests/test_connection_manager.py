@@ -420,12 +420,31 @@ def test_an_information_request_unwraps_the_server_envelope(
 
 
 @pytest.mark.parametrize("kind", ["metar", "vatatis"])
-def test_an_information_request_reports_a_server_error(logger, monkeypatch, kind):
+def test_an_information_request_reports_a_server_error_without_the_braces(
+    logger, monkeypatch, kind
+):
     cm = connected(logger, monkeypatch)
     serving(monkeypatch, "error {invalid logon}")
 
-    with pytest.raises(HoppieError):
+    with pytest.raises(HoppieError, match=r"request error: invalid logon$"):
         cm.send_info_request(kind, "EDDF")
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["ok", "ok ", "ok {server info {}}", "ok {server info { }}"],
+    ids=["bare-ok", "ok-with-space", "empty-envelope", "blank-envelope"],
+)
+def test_a_station_with_nothing_to_report_is_reported_as_unavailable(
+    logger, monkeypatch, body
+):
+    """The empty envelope used to be returned as the literal text
+    "{server info {}}", which the weather monitor then announced as a report."""
+    cm = connected(logger, monkeypatch)
+    serving(monkeypatch, body)
+
+    with pytest.raises(HoppieError, match="No METAR available for EDDF"):
+        cm.send_info_request("metar", "EDDF")
 
 
 def test_an_information_request_sends_a_timeout(logger, monkeypatch):
