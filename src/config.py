@@ -122,6 +122,15 @@ LINK_BACKOFF_MS = (20000, 60000, 120000, 300000)
 # this delay.
 RATE_LIMIT_RETRY_MS = 5000
 
+# After a HANDOVER the station that handed the aircraft over may still send
+# a WILCO-required instruction (typically the CONTACT frequency); the log
+# shows this in 22 of 163 handovers. Its uplinks stay answerable this long.
+PREVIOUS_STATION_WINDOW_SECONDS = 600
+
+# A REQUEST LOGON nobody answers is given up on after this long, and the
+# pilot is told.
+PENDING_LOGON_TIMEOUT_SECONDS = 600
+
 # Automatic weather updates. The interval is a re-request on a timer rather
 # than a push from the network, so keep it gentle on the ACARS servers.
 DEFAULT_WEATHER_INTERVAL_MINUTES = 5
