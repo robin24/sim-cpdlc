@@ -8,6 +8,7 @@ from tests.support import FakeConnectionManager, uplink
 from hoppie_connector import CpdlcResponseRequirement as RR
 
 from src.controller.polling_controller import PollingController
+from src.model.connection_manager import PollResult
 from src.model.message_manager import CPDLC_RESPONSES
 
 
@@ -93,7 +94,7 @@ class RaisingConnection:
 
     def poll(self):
         self.polls += 1
-        return ["UPLINK"], None
+        return PollResult(ok=True, messages=["UPLINK"])
 
     def poll_failed(self):
         return False
@@ -191,7 +192,7 @@ class ClearanceConnection:
         return True
 
     def poll(self):
-        return [self.message], None
+        return PollResult(ok=True, messages=[self.message])
 
     def poll_failed(self):
         return False

@@ -9,6 +9,7 @@ import wx
 from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
 
 from src.config import DEFAULT_CONFIG, save_config
+from src.model.connection_manager import PollResult
 
 CLIENT_CALLSIGN = "DLH123"
 
@@ -47,6 +48,7 @@ class FakeConnectionManager:
         self.sent = []
         self.telexes = []
         self.info_requests = []
+        self.poll_results = []
 
     def is_connected(self):
         return self._connected
@@ -66,6 +68,12 @@ class FakeConnectionManager:
             raise self.raise_with
         self.info_requests.append((info_type, icao))
         return f"{icao} REPORT FOR {info_type}"
+
+    def poll(self):
+        """Serve the next scripted PollResult, or a clean empty poll."""
+        if self.poll_results:
+            return self.poll_results.pop(0)
+        return PollResult(ok=True)
 
 
 class RecordingMessageView:

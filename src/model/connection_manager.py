@@ -1,11 +1,14 @@
 """Connection management for the CPDLC client."""
 
+import ast
 import functools
 import re
+import warnings
+from dataclasses import dataclass, field
 
 import requests
 
-from hoppie_connector import HoppieConnector, HoppieError
+from hoppie_connector import HoppieConnector, HoppieError, HoppieWarning
 
 from src.config import (
     SAYINTENTIONS_API_URL,
@@ -73,6 +76,66 @@ def redact(text):
     return _LOGON_PATTERN.sub(r"\1<redacted>", str(text))
 
 
+_UNPARSEABLE_PATTERN = re.compile(r"^Unable to parse (\{.*\}): (.*)$", re.DOTALL)
+
+# The server's reasons that no retry can fix. Matched case-insensitively
+# against the reason text of a failed poll.
+_FATAL_REASONS = ("invalid logon",)
+
+
+@dataclass
+class UnreadableMessage:
+    """An uplink the server delivered but hoppie_connector could not decode."""
+
+    sender: str
+    raw: str
+
+
+@dataclass
+class PollResult:
+    """What one poll produced.
+
+    Attributes:
+        ok: True if the server answered and the response parsed
+        messages: HoppieMessage objects, in the order the server sent them
+        unreadable: UnreadableMessage records for items the library dropped
+        reason: Server reason or error text when the poll failed
+        fatal: True when the reason is one no retry can fix
+        failures: Consecutive failed polls, as counted by the manager, after
+            this poll (0 after a success)
+    """
+
+    ok: bool
+    messages: list = field(default_factory=list)
+    unreadable: list = field(default_factory=list)
+    reason: str | None = None
+    fatal: bool = False
+    failures: int = 0
+
+
+def unreadable_from_warning(text):
+    """Recover sender and packet from hoppie_connector's "Unable to parse" warning.
+
+    The library formats the warning as ``Unable to parse {<item dict>}: <error>``
+    where the item dict is the poll entry ``{'from': ..., 'type': ..., 'packet':
+    ...}``. Anything else is kept whole so nothing is lost.
+
+    Args:
+        text: The warning message
+
+    Returns:
+        UnreadableMessage: sender and raw packet, or "?" and the whole text
+    """
+    match = _UNPARSEABLE_PATTERN.match(text)
+    if match:
+        try:
+            item = ast.literal_eval(match.group(1))
+            return UnreadableMessage(str(item.get("from", "?")), str(item.get("packet", "")))
+        except (ValueError, SyntaxError, AttributeError):
+            pass
+    return UnreadableMessage("?", text)
+
+
 class ConnectionManager:
     """Manages network connections to the CPDLC service.
 
@@ -87,8 +150,10 @@ class ConnectionManager:
 
     Transport failures are also counted -- polls into connection_failures,
     sends into send_failures, and information requests into info_failures.
-    Only the first two reach failure_count(): weather runs on a worker thread
-    and a failing ATIS is no evidence the CPDLC link is down.
+    poll() reports its count in the PollResult it returns; the link state
+    machine in the polling controller decides what the count means. Weather
+    runs on a worker thread and a failing ATIS is no evidence the CPDLC link
+    is down, so info_failures gates nothing.
     """
 
     def __init__(self, logger, message_callback=None):
@@ -273,39 +338,58 @@ class ConnectionManager:
     def poll(self):
         """Poll for new messages from the network.
 
+        Never raises. Uplinks that hoppie_connector cannot parse are dropped by
+        the library with a HoppieWarning after the server has already marked
+        them delivered; they are captured here and reported as unreadable so
+        the pilot can be told something arrived.
+
         Returns:
-            tuple: (messages, poll_status) on success, where messages may be an
-                empty list. (None, None) if not connected or if the poll
-                failed; poll_failed() distinguishes the two.
+            PollResult: The messages, the unreadable items, and the failure
+                state after this poll.
         """
         if not self.cnx:
-            return None, None
+            return PollResult(ok=False, reason="Not connected", failures=self.connection_failures)
 
         try:
             self.logger.debug("Polling for new messages")
-            messages, poll_status = self._call(self.cnx.poll)
-
-            # Reset connection failures counter on successful poll
-            if self.connection_failures > 0:
-                self.logger.debug(
-                    f"Resetting connection failures from {self.connection_failures} to 0"
-                )
-            self.connection_failures = 0
-
-            return messages, poll_status
+            with warnings.catch_warnings(record=True) as caught:
+                # "always": the default filter shows a repeated warning once
+                # per call site, which would hide the second dropped message.
+                warnings.simplefilter("always", HoppieWarning)
+                messages, _delay = self._call(self.cnx.poll)
         except Exception as exc:
             # Deliberately broad: anything that escapes here would otherwise
-            # skip the counter entirely and disable reconnection for good.
-            self.logger.error(f"Poll error: {redact(exc)}")
+            # skip the counter entirely and disable the link state for good.
+            reason = redact(exc)
+            self.logger.error(f"Poll error: {reason}")
             if not getattr(exc, "is_transport", False):
                 # _call already counted transport failures. A poll carries no
-                # user input, so any other failure — an unparseable body from a
-                # captive portal, a server-side error — is equally a dead link.
+                # user input, so any other failure -- an unparseable body from a
+                # captive portal, a server-side error -- is equally a dead link.
                 self.connection_failures += 1
                 self.logger.warning(
                     f"Connection failure count: {self.connection_failures}/{self.max_connection_failures}"
                 )
-            return None, None
+            fatal = any(marker in reason.lower() for marker in _FATAL_REASONS)
+            return PollResult(
+                ok=False, reason=reason, fatal=fatal, failures=self.connection_failures
+            )
+
+        unreadable = [
+            unreadable_from_warning(str(warning.message))
+            for warning in caught
+            if issubclass(warning.category, HoppieWarning)
+        ]
+        for item in unreadable:
+            self.logger.error(f"Unreadable message from {item.sender}: {item.raw}")
+
+        if self.connection_failures > 0:
+            self.logger.debug(
+                f"Resetting connection failures from {self.connection_failures} to 0"
+            )
+        self.connection_failures = 0
+
+        return PollResult(ok=True, messages=messages, unreadable=unreadable)
 
     def failure_count(self):
         """Return the worst of the poll and send failure counts."""

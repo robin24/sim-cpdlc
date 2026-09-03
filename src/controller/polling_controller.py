@@ -146,10 +146,11 @@ class PollingController:
         # reconnection-failure branch below still ends polling deliberately.
         try:
             try:
-                messages, poll_status = self.connection_manager.poll()
+                result = self.connection_manager.poll()
             except Exception as e:
                 self.logger.error(f"Unexpected error during poll: {e}")
                 return
+            messages = result.messages
 
             # Surface link state: a failing poll is otherwise invisible, leaving
             # the status bar reading "Connected" through a total outage.
