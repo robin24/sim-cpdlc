@@ -391,48 +391,6 @@ class ConnectionManager:
 
         return PollResult(ok=True, messages=messages, unreadable=unreadable)
 
-    def failure_count(self):
-        """Return the worst of the poll and send failure counts."""
-        return max(self.connection_failures, self.send_failures)
-
-    def poll_failed(self):
-        """Check whether the connection is currently in a failed state."""
-        return self.failure_count() > 0
-
-    def should_attempt_reconnection(self):
-        """Check if reconnection should be attempted based on failure count."""
-        return bool(
-            self.cnx
-            and self.failure_count() >= self.max_connection_failures
-            and self.callsign
-            and self.logon_code
-        )
-
-    def attempt_reconnection(self):
-        """Attempt to reconnect to the CPDLC network.
-
-        Returns:
-            bool: True if reconnection successful, False otherwise
-        """
-        if not self.callsign or not self.logon_code:
-            self.logger.error("Cannot reconnect: missing callsign or logon code")
-            return False
-
-        try:
-            self.logger.info(f"Attempting to reconnect as {self.callsign}...")
-            self.cnx = self._open(self.callsign, self.logon_code, self.network_type)
-
-            # Reset connection failures counter
-            self.connection_failures = 0
-            self.send_failures = 0
-            self.info_failures = 0
-            self.logger.info(f"Reconnection successful for {self.callsign}")
-            return True
-        except HoppieError as exc:
-            self.logger.error(f"Reconnection failed: {exc}")
-            self.cnx = None
-            return False
-
     def send_cpdlc(self, recipient, min_value, response_type, message, mrn=None):
         """Send a CPDLC message.
 

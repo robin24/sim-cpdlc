@@ -173,7 +173,7 @@ def test_both_api_urls_use_https():
     assert SAYINTENTIONS_API_URL.startswith("https://")
 
 
-# --- connect and reconnect actually verify the link ---------------------------
+# --- connect actually verifies the link ---------------------------------------
 
 
 def test_connect_succeeds_against_a_healthy_server(logger, monkeypatch):
@@ -205,26 +205,6 @@ def test_connect_rejects_a_callsign_the_library_cannot_send_with(logger, monkeyp
         cm.connect("D-AIBL", LOGON, "hoppie")
 
     assert cm.is_connected() is False
-
-
-def test_reconnection_reports_failure_when_the_server_is_still_down(
-    logger, monkeypatch
-):
-    """Rebuilding the connector alone always 'succeeded', so a dead link
-    produced an endless cycle of false 'Reconnection successful' log lines."""
-    cm = connected(logger, monkeypatch)
-    serving(monkeypatch, "", status_code=502)
-
-    assert cm.attempt_reconnection() is False
-    assert cm.is_connected() is False
-
-
-def test_reconnection_succeeds_once_the_server_recovers(logger, monkeypatch):
-    cm = connected(logger, monkeypatch)
-    cm.connection_failures = 3
-
-    assert cm.attempt_reconnection() is True
-    assert cm.connection_failures == 0
 
 
 # --- poll results -------------------------------------------------------------
