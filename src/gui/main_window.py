@@ -44,12 +44,15 @@ from src.gui.dialogs import (
     WhenCanWeDialog,
     show_about_dialog,
 )
-from src.utils.message_formatting import extract_message_content
 from src.utils.weather_parsing import report_type_label
 from src.utils.update_checker import UpdateChecker
 from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
+
+# A HANDOVER names the next station as a 4-letter code; the @ separators the
+# networks wrap it in have been flattened to spaces by then.
+HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+([A-Z]{4})$")
 
 
 class MainWindow(wx.Frame):
@@ -1039,112 +1042,121 @@ class MainWindow(wx.Frame):
     def _on_message_received(self, message):
         """Handle received messages from the network.
 
+        Only a CPDLC message can change session state or tune the radio.
+        Telex, progress and ADS-C messages are shown and nothing else, so a
+        telex reading LOGON ACCEPTED cannot log the aircraft on (audit L-2).
+
         Args:
             message: The received message
         """
-        # Check for protocol noise messages before adding to view
-        if hasattr(message, "get_packet_content") and hasattr(
-            message, "get_from_name"
-        ):
-            raw_content = message.get_packet_content()
-            pre_msg_text = extract_message_content(raw_content) or ""
-            pre_msg_text = " ".join(pre_msg_text.replace("@", " ").split())
-            if pre_msg_text.startswith("CURRENT ATC UNIT") or pre_msg_text.startswith("CURRENT ATS UNIT"):
-                self.logger.debug(f"Hiding protocol message: {pre_msg_text}")
+        text = None
+        if isinstance(message, CpdlcMessage):
+            text = self._protocol_text(message)
+            # Protocol noise, hidden before it reaches the list
+            if text.startswith("CURRENT ATC UNIT") or text.startswith("CURRENT ATS UNIT"):
+                self.logger.debug(f"Hiding protocol message: {text}")
                 return
 
-        # Add to message manager
         message_id = self.message_manager.add_message(message)
-        if message_id >= 0:
-            # Add to view
-            self.message_view.add_message(message_id)
+        if message_id < 0:
+            return
 
-            # Play sound for new messages
-            self._play_message_sound()
+        self.message_view.add_message(message_id)
+        self._play_message_sound()
 
-            # Check for special messages that affect CPDLC session state
-            if hasattr(message, "get_packet_content") and hasattr(
-                message, "get_from_name"
-            ):
-                raw_content = message.get_packet_content()
-                sender = message.get_from_name()
-                msg_text = extract_message_content(raw_content) or ""
-                # Normalize @ separators to spaces for protocol-level matching
-                msg_text = " ".join(msg_text.replace("@", " ").split())
+        if text is not None:
+            self._handle_session_uplink(message, text)
 
-                # Check for LOGON ACCEPTED message
-                if msg_text == "LOGON ACCEPTED":
-                    # Handle automatic handovers or explicit logon acceptance
-                    mrn = message.get_mrn() if hasattr(message, "get_mrn") else None
-                    # Only report the logon if the session actually accepted it;
-                    # a stale acceptance from a previously contacted station is
-                    # ignored and must not be announced as success.
-                    if self.cpdlc_session.handle_logon_accepted(sender, mrn=mrn):
-                        # Update UI
-                        self.SetStatusText(f"Logged on to {sender}.")
-                        self.logger.info(f"Logon accepted by {sender}")
+    @staticmethod
+    def _protocol_text(message):
+        """A CPDLC message element with its @ separators flattened to spaces."""
+        return " ".join(message.get_message().replace("@", " ").split())
 
-                # Check for HANDOVER message from current station
-                elif sender == self.cpdlc_session.get_current_station():
-                    match = re.match(r"^HANDOVER\s+([A-Z]{4})$", msg_text)
-                    if match:
-                        new_station = match.group(1)
-                        self.logger.info(
-                            f"Handover detected from {sender} to {new_station}"
-                        )
+    def _handle_session_uplink(self, message, text):
+        """Apply a CPDLC uplink to the session, then tune the radio if it asks.
 
-                        # Update logon state (log off from current station)
-                        self.cpdlc_session.handle_station_logoff(sender)
-                        self.SetStatusText(f"Logged off from {sender}.")
+        Args:
+            message: The CpdlcMessage, already in the list
+            text: Its element text as returned by _protocol_text
+        """
+        session = self.cpdlc_session
+        sender = message.get_from_name()
+        mrn = message.get_mrn()
 
-                        # Add system message about logging on to new station
-                        self._add_custom_message(
-                            f"Logging on to {new_station}", "SYSTEM"
-                        )
+        if text.startswith("LOGON ACCEPTED"):
+            # Only report the logon if the session actually accepted it; a
+            # stale acceptance from a previously contacted station is ignored
+            # and must not be announced as success.
+            if session.handle_logon_accepted(sender, mrn=mrn):
+                self.SetStatusText(f"Logged on to {sender}.")
+                self.logger.info(f"Logon accepted by {sender}")
+        elif text.startswith("LOGON REJECTED") or (text == "UNABLE" and mrn is not None):
+            # An UNABLE is only a rejection when it answers the REQUEST LOGON;
+            # the session checks the station and the MRN.
+            if session.handle_logon_rejected(sender, mrn=mrn):
+                self.SetStatusText(f"Logon to {sender} rejected.")
+                self._add_custom_message(f"Logon to {sender} rejected", "SYSTEM")
+        elif sender == session.get_current_station():
+            match = HANDOVER_PATTERN.match(text)
+            if match:
+                self._follow_handover(sender, match.group(1))
+            elif text == "LOGOFF":
+                session.handle_station_logoff(sender)
+                self.SetStatusText(f"Logged off from {sender}.")
+                self.logger.info(f"Received LOGOFF from {sender}")
 
-                        # Send logon request to the new station
-                        success, message = self.cpdlc_session.logon(new_station)
-                        if success:
-                            if message:
-                                self._add_custom_message(message)
-                            self.SetStatusText(f"Pending logon to {new_station}.")
-                            self.polling_controller.set_active_polling()
-                        else:
-                            error_detail = f": {message}" if message else ""
-                            self.logger.error(
-                                f"Failed to send logon request to {new_station} during handover{error_detail}"
-                            )
-                            self._add_custom_message(
-                                f"Failed to logon to {new_station} during handover{error_detail}",
-                                "SYSTEM",
-                            )
+        # The station that handed the aircraft over may still send the CONTACT
+        # for the next frequency, so any answerable sender may tune the radio.
+        if session.is_answerable_sender(sender):
+            self._auto_tune(text)
 
-                    # Check for LOGOFF message from current station
-                    elif msg_text == "LOGOFF":
-                        self.cpdlc_session.handle_station_logoff(sender)
-                        # Update UI
-                        self.SetStatusText(f"Logged off from {sender}.")
-                        self.logger.info(f"Received LOGOFF from {sender}")
+    def _follow_handover(self, sender, new_station):
+        """Log on to the station a HANDOVER names.
 
-                    # Check for CONTACT/MONITOR frequency (auto-tune COM1 standby)
-                    config = load_config()
-                    if config.get("auto_tune_com1", True):
-                        freq = extract_contact_frequency(msg_text)
-                        if freq is not None:
-                            self.logger.info(
-                                f"CONTACT/MONITOR frequency detected: {freq:.3f} MHz"
-                            )
-                            if self.simconnect_manager.set_com1_standby_mhz(freq):
-                                self.logger.info(
-                                    f"COM1 standby set to {freq:.3f} MHz"
-                                )
-                            else:
-                                self.logger.warning(
-                                    "Could not set COM1 standby (SimConnect unavailable)"
-                                )
-                                self.SetStatusText(
-                                    f"Auto-tune failed \u2014 set {freq:.3f} manually"
-                                )
+        Args:
+            sender: The station handing over (the current station)
+            new_station: The station to log on to
+        """
+        self.logger.info(f"Handover detected from {sender} to {new_station}")
+        self.SetStatusText(f"Logged off from {sender}.")
+        self._add_custom_message(f"Logging on to {new_station}", "SYSTEM")
+
+        success, message = self.cpdlc_session.handle_handover(sender, new_station)
+        if success:
+            if message:
+                self._add_custom_message(message)
+            self.SetStatusText(f"Pending logon to {new_station}.")
+            self.polling_controller.set_active_polling()
+        else:
+            error_detail = f": {message}" if message else ""
+            self.logger.error(
+                f"Failed to send logon request to {new_station} during handover{error_detail}"
+            )
+            self._add_custom_message(
+                f"Failed to logon to {new_station} during handover{error_detail}",
+                "SYSTEM",
+            )
+
+    def _auto_tune(self, text):
+        """Put a CONTACT/MONITOR frequency into the COM1 standby, if enabled.
+
+        Args:
+            text: The uplink's element text as returned by _protocol_text
+        """
+        config = load_config()
+        if not config.get("auto_tune_com1", True):
+            return
+
+        freq = extract_contact_frequency(text)
+        if freq is None:
+            return
+
+        self.logger.info(f"CONTACT/MONITOR frequency detected: {freq:.3f} MHz")
+        if self.simconnect_manager.set_com1_standby_mhz(freq):
+            self.logger.info(f"COM1 standby set to {freq:.3f} MHz")
+        else:
+            self.logger.warning("Could not set COM1 standby (SimConnect unavailable)")
+            self.SetStatusText(f"Auto-tune failed \u2014 set {freq:.3f} manually")
 
     def _on_acknowledge_message(self, message_id: int, response: str, retried=False):
         """Handle message acknowledgement.
