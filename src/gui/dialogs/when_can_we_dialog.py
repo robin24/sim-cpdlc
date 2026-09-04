@@ -53,9 +53,10 @@ class WhenCanWeDialog(wx.Dialog):
 
         # Value field (shown only for types that need it)
         vbox.Add((0, 5))
-        self.value_label = wx.StaticText(self, label="Value:")
+        self.value_label = wx.StaticText(self, label="&Value:")
         vbox.Add(self.value_label, 0, wx.ALL, 5)
         self.value_text = wx.TextCtrl(self)
+        self.value_text.SetName("Value")
         vbox.Add(self.value_text, 0, wx.ALL | wx.EXPAND, 5)
 
         self.helper_text = wx.StaticText(self, label="")

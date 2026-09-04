@@ -32,15 +32,17 @@ class TelexDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        recipient_label = wx.StaticText(self, label="To:")
+        recipient_label = wx.StaticText(self, label="&To:")
         vbox.Add(recipient_label, 0, wx.ALL, 5)
         self.recipient_text = wx.TextCtrl(self)
         self.recipient_text.SetValue(recipient)
+        self.recipient_text.SetName("To")
         vbox.Add(self.recipient_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        message_label = wx.StaticText(self, label="Message:")
+        message_label = wx.StaticText(self, label="&Message:")
         vbox.Add(message_label, 0, wx.ALL, 5)
         self.message_text = wx.TextCtrl(self, style=wx.TE_MULTILINE, size=(-1, 100))
+        self.message_text.SetName("Message")
         vbox.Add(self.message_text, 1, wx.ALL | wx.EXPAND, 5)
 
         # Read by screen readers on request; says why OK is disabled. Created

@@ -23,9 +23,10 @@ class LogonDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        station_label = wx.StaticText(self, label="Station:")
+        station_label = wx.StaticText(self, label="&Station:")
         vbox.Add(station_label, 0, wx.ALL, 5)
         self.station_text = wx.TextCtrl(self)
+        self.station_text.SetName("Station")
         vbox.Add(self.station_text, 0, wx.ALL | wx.EXPAND, 5)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)

@@ -29,9 +29,10 @@ class AltitudeChangeDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        altitude_label = wx.StaticText(self, label="Requested Altitude (FL):")
+        altitude_label = wx.StaticText(self, label="Requested &Altitude (FL):")
         vbox.Add(altitude_label, 0, wx.ALL, 5)
         self.altitude_text = wx.TextCtrl(self)
+        self.altitude_text.SetName("Requested Altitude (FL)")
         vbox.Add(self.altitude_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Add a helper text for altitude format
@@ -46,9 +47,9 @@ class AltitudeChangeDialog(wx.Dialog):
         reason_label = wx.StaticText(self, label="Reason (optional):")
         vbox.Add(reason_label, 0, wx.ALL, 5)
 
-        self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
-        self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
+        self.reason_none = wx.RadioButton(self, label="&None", style=wx.RB_GROUP)
+        self.reason_weather = wx.RadioButton(self, label="Due to &weather")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft &performance")
 
         self.reason_none.SetValue(True)
 

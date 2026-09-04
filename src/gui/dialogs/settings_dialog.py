@@ -44,11 +44,12 @@ class SettingsDialog(wx.Dialog):
 
         # SayIntentions Logon code field
         sayintentions_logon_code_label = wx.StaticText(
-            self, label="SayIntentions Logon code:"
+            self, label="&SayIntentions Logon code:"
         )
         vbox.Add(sayintentions_logon_code_label, 0, wx.ALL, 5)
         self.sayintentions_logon_code_text = wx.TextCtrl(self)
         self.sayintentions_logon_code_text.SetValue(sayintentions_logon_code)
+        self.sayintentions_logon_code_text.SetName("SayIntentions Logon code")
         vbox.Add(self.sayintentions_logon_code_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Help text for SayIntentions logon code
@@ -63,10 +64,11 @@ class SettingsDialog(wx.Dialog):
         vbox.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.ALL, 5)
 
         # Hoppie Logon code field
-        hoppie_logon_code_label = wx.StaticText(self, label="Hoppie Logon code:")
+        hoppie_logon_code_label = wx.StaticText(self, label="&Hoppie Logon code:")
         vbox.Add(hoppie_logon_code_label, 0, wx.ALL, 5)
         self.hoppie_logon_code_text = wx.TextCtrl(self)
         self.hoppie_logon_code_text.SetValue(hoppie_logon_code)
+        self.hoppie_logon_code_text.SetName("Hoppie Logon code")
         vbox.Add(self.hoppie_logon_code_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Help text for Hoppie logon code
@@ -81,10 +83,11 @@ class SettingsDialog(wx.Dialog):
         vbox.Add(wx.StaticLine(self), 0, wx.EXPAND | wx.ALL, 5)
 
         # SimBrief User ID field
-        simbrief_label = wx.StaticText(self, label="SimBrief User ID:")
+        simbrief_label = wx.StaticText(self, label="SimBrief &User ID:")
         vbox.Add(simbrief_label, 0, wx.ALL, 5)
         self.simbrief_userid_text = wx.TextCtrl(self)
         self.simbrief_userid_text.SetValue(simbrief_userid)
+        self.simbrief_userid_text.SetName("SimBrief User ID")
         vbox.Add(self.simbrief_userid_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Help text for SimBrief User ID
@@ -100,7 +103,7 @@ class SettingsDialog(wx.Dialog):
 
         # Auto-update checkbox
         self.auto_check_updates_checkbox = wx.CheckBox(
-            self, label="Automatically check for updates"
+            self, label="&Automatically check for updates"
         )
         self.auto_check_updates_checkbox.SetValue(auto_check_updates)
         vbox.Add(self.auto_check_updates_checkbox, 0, wx.ALL, 5)
@@ -118,7 +121,7 @@ class SettingsDialog(wx.Dialog):
 
         # Auto-tune COM1 checkbox
         self.auto_tune_com1_checkbox = wx.CheckBox(
-            self, label="Auto-tune COM1 standby on CONTACT/MONITOR"
+            self, label="Auto-&tune COM1 standby on CONTACT/MONITOR"
         )
         self.auto_tune_com1_checkbox.SetValue(auto_tune_com1)
         vbox.Add(self.auto_tune_com1_checkbox, 0, wx.ALL, 5)
@@ -136,7 +139,7 @@ class SettingsDialog(wx.Dialog):
 
         # Automatic weather update interval
         weather_interval_label = wx.StaticText(
-            self, label="Automatic weather update interval (minutes):"
+            self, label="Automatic &weather update interval (minutes):"
         )
         vbox.Add(weather_interval_label, 0, wx.ALL, 5)
         self.weather_interval_spin = wx.SpinCtrl(
@@ -145,7 +148,7 @@ class SettingsDialog(wx.Dialog):
             max=MAX_WEATHER_INTERVAL_MINUTES,
             initial=weather_update_interval,
         )
-        self.weather_interval_spin.SetName("Automatic weather update interval in minutes")
+        self.weather_interval_spin.SetName("Automatic weather update interval (minutes)")
         vbox.Add(self.weather_interval_spin, 0, wx.ALL, 5)
 
         weather_interval_help_text = wx.StaticText(

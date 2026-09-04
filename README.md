@@ -56,6 +56,10 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 - Menu bar: contains all the controls needed to use the client, connect to the network, etc.
 - Status bar: shows your current network status. Can easily be read with NVDA by pressing NVDA+End while the Sim-CPDLC window is in focus
 
+Every control in the dialogs has an access key: press Alt together with the
+letter your screen reader announces (or the underlined one) to jump straight to
+it. Enter activates OK and Escape cancels.
+
 ### Connecting to the Network
 
 1. Click `File > Connect`
