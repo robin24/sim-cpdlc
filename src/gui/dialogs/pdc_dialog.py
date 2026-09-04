@@ -21,7 +21,7 @@ class PDCDialog(wx.Dialog):
                 flight plan off the GUI thread and calls on_done(ofp_or_None)
                 on it; returns False when no SimBrief id is configured. None
                 skips the fetch. The dialog opens at once either way and fills
-                the callsign in when the plan arrives.
+                the airports and aircraft in when the plan arrives.
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Request PDC", size=(-1, -1))
         self.logger = logging.getLogger("Sim-CPDLC")
@@ -93,21 +93,29 @@ class PDCDialog(wx.Dialog):
         if not ofp_data:
             self.logger.warning("Could not fetch flight plan from SimBrief")
             self.simbrief_status.SetLabel("Could not fetch flight plan from SimBrief.")
-            return
+        else:
+            filled = 0
+            for field, key in (
+                (self.origin_icao_text, "origin"),
+                (self.destination_icao_text, "destination"),
+                (self.aircraft_text, "aircraft"),
+            ):
+                value = (ofp_data.get(key) or {}).get("icao_code", "")
+                if value:
+                    self.logger.info(f"Found {key} ICAO in SimBrief OFP: {value}")
+                    field.SetValue(value)
+                    filled += 1
+                else:
+                    self.logger.warning(f"Could not extract {key} ICAO from SimBrief OFP")
 
-        for field, key in (
-            (self.origin_icao_text, "origin"),
-            (self.destination_icao_text, "destination"),
-            (self.aircraft_text, "aircraft"),
-        ):
-            value = (ofp_data.get(key) or {}).get("icao_code", "")
-            if value:
-                self.logger.info(f"Found {key} ICAO in SimBrief OFP: {value}")
-                field.SetValue(value)
+            if filled:
+                self.simbrief_status.SetLabel("Flight plan loaded from SimBrief.")
             else:
-                self.logger.warning(f"Could not extract {key} ICAO from SimBrief OFP")
+                self.simbrief_status.SetLabel("Could not read the flight plan from SimBrief.")
 
-        self.simbrief_status.SetLabel("Flight plan loaded from SimBrief.")
+        # Every path above only sets the label; the re-layout has to happen
+        # once, here, or the dialog keeps the size Fit() computed for the
+        # empty label and the new text runs past the right edge.
         self.on_text_change(None)
         self.Layout()
         self.Fit()

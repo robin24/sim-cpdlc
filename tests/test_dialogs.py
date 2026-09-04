@@ -174,3 +174,38 @@ def test_the_pdc_dialog_fills_its_fields_from_simbrief(frame):
         assert dialog.simbrief_status.GetLabel() == "Flight plan loaded from SimBrief."
     finally:
         dialog.Destroy()
+
+
+def test_a_failed_simbrief_fetch_is_laid_out_in_the_pdc_dialog(frame):
+    """The failure text is longer than the empty label the dialog was fitted
+    around; without a re-layout it ran past the dialog's right edge."""
+    fetch = RecordingFetch()
+    dialog = PDCDialog(frame, fetch_simbrief=fetch)
+    try:
+        fetch.on_done(None)
+
+        assert dialog.simbrief_status.GetLabel() == "Could not fetch flight plan from SimBrief."
+        label_right = dialog.simbrief_status.GetPosition().x + dialog.simbrief_status.GetSize().width
+        assert label_right <= dialog.GetClientSize().width
+    finally:
+        dialog.Destroy()
+
+
+def test_a_flight_plan_without_the_fields_is_not_reported_as_loaded(frame):
+    fetch = RecordingFetch()
+    dialog = PDCDialog(frame, fetch_simbrief=fetch)
+    try:
+        fetch.on_done({"general": {}})
+
+        assert dialog.simbrief_status.GetLabel() == "Could not read the flight plan from SimBrief."
+        assert dialog.origin_icao_text.GetValue() == ""
+    finally:
+        dialog.Destroy()
+
+
+def test_a_simbrief_answer_after_the_pdc_dialog_closed_is_ignored(frame):
+    fetch = RecordingFetch()
+    dialog = PDCDialog(frame, fetch_simbrief=fetch)
+    dialog.Destroy()
+
+    fetch.on_done({"origin": {"icao_code": "EGLL"}})
