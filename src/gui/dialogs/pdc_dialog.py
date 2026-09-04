@@ -4,8 +4,6 @@ Pre-Departure Clearance (PDC) dialog for the Sim-CPDLC application.
 
 import wx
 import logging
-from src.config import load_config
-from src.utils.simbrief import get_latest_ofp
 
 
 class PDCDialog(wx.Dialog):
@@ -13,19 +11,21 @@ class PDCDialog(wx.Dialog):
     Dialog for requesting a pre-departure clearance.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, fetch_simbrief=None):
         """
         Initialize the PDC dialog.
 
         Args:
             parent: The parent window
+            fetch_simbrief: Callable(on_done) that fetches the latest SimBrief
+                flight plan off the GUI thread and calls on_done(ofp_or_None)
+                on it; returns False when no SimBrief id is configured. None
+                skips the fetch. The dialog opens at once either way and fills
+                the callsign in when the plan arrives.
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Request PDC", size=(-1, -1))
         self.logger = logging.getLogger("Sim-CPDLC")
-
-        # Load config to get SimBrief User ID
-        config = load_config()
-        simbrief_userid = config.get("simbrief_userid", "")
+        self._alive = True
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
@@ -44,66 +44,10 @@ class PDCDialog(wx.Dialog):
         self.aircraft_text = wx.TextCtrl(self)
         vbox.Add(self.aircraft_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        # Try to populate fields from SimBrief if a user ID is available
-        if simbrief_userid:
-            self.logger.debug(
-                f"Attempting to fetch SimBrief OFP for user ID: {simbrief_userid}"
-            )
-            try:
-                ofp_data = get_latest_ofp(simbrief_userid)
-                if ofp_data:
-                    # Extract departure ICAO
-                    origin = ofp_data.get("origin", {})
-                    origin_icao = origin.get("icao_code", "")
-                    if origin_icao:
-                        self.logger.info(
-                            f"Found departure ICAO in SimBrief OFP: {origin_icao}"
-                        )
-                        self.origin_icao_text.SetValue(origin_icao)
-                    else:
-                        self.logger.warning(
-                            "Could not extract departure ICAO from SimBrief OFP"
-                        )
-
-                    # Extract destination ICAO
-                    destination = ofp_data.get("destination", {})
-                    destination_icao = destination.get("icao_code", "")
-                    if destination_icao:
-                        self.logger.info(
-                            f"Found destination ICAO in SimBrief OFP: {destination_icao}"
-                        )
-                        self.destination_icao_text.SetValue(destination_icao)
-                    else:
-                        self.logger.warning(
-                            "Could not extract destination ICAO from SimBrief OFP"
-                        )
-
-                    # Extract aircraft code
-                    aircraft = ofp_data.get("aircraft", {})
-                    aircraft_icao = aircraft.get("icao_code", "")
-                    if aircraft_icao:
-                        self.logger.info(
-                            f"Found aircraft ICAO in SimBrief OFP: {aircraft_icao}"
-                        )
-                        self.aircraft_text.SetValue(aircraft_icao)
-                    else:
-                        self.logger.warning(
-                            "Could not extract aircraft ICAO from SimBrief OFP"
-                        )
-                else:
-                    self.logger.warning("Failed to fetch SimBrief OFP data")
-                    wx.MessageBox(
-                        "Could not fetch flight plan from SimBrief.",
-                        "SimBrief",
-                        wx.OK | wx.ICON_WARNING,
-                    )
-            except Exception as e:
-                self.logger.error(f"Error fetching SimBrief OFP: {str(e)}")
-                wx.MessageBox(
-                    f"Error fetching SimBrief data: {e}",
-                    "SimBrief",
-                    wx.OK | wx.ICON_WARNING,
-                )
+        # The flight plan arrives after the dialog is open; this line says
+        # where it stands so a screen-reader user is not left guessing.
+        self.simbrief_status = wx.StaticText(self, label="")
+        vbox.Add(self.simbrief_status, 0, wx.ALL, 5)
 
         stand_label = wx.StaticText(self, label="Stand number:")
         vbox.Add(stand_label, 0, wx.ALL, 5)
@@ -133,6 +77,45 @@ class PDCDialog(wx.Dialog):
         self.aircraft_text.Bind(wx.EVT_TEXT, self.on_text_change)
         self.stand_text.Bind(wx.EVT_TEXT, self.on_text_change)
         self.atis_text.Bind(wx.EVT_TEXT, self.on_text_change)
+
+        if fetch_simbrief is not None and fetch_simbrief(self._on_simbrief):
+            self.simbrief_status.SetLabel("Fetching SimBrief flight plan...")
+
+    def _on_simbrief(self, ofp_data):
+        """Fill the airports and aircraft in from the flight plan, if the dialog is still open.
+
+        Args:
+            ofp_data: The SimBrief OFP dict, or None when the fetch failed
+        """
+        if not self._alive:
+            return
+
+        if not ofp_data:
+            self.logger.warning("Could not fetch flight plan from SimBrief")
+            self.simbrief_status.SetLabel("Could not fetch flight plan from SimBrief.")
+            return
+
+        for field, key in (
+            (self.origin_icao_text, "origin"),
+            (self.destination_icao_text, "destination"),
+            (self.aircraft_text, "aircraft"),
+        ):
+            value = (ofp_data.get(key) or {}).get("icao_code", "")
+            if value:
+                self.logger.info(f"Found {key} ICAO in SimBrief OFP: {value}")
+                field.SetValue(value)
+            else:
+                self.logger.warning(f"Could not extract {key} ICAO from SimBrief OFP")
+
+        self.simbrief_status.SetLabel("Flight plan loaded from SimBrief.")
+        self.on_text_change(None)
+        self.Layout()
+        self.Fit()
+
+    def Destroy(self):
+        """Forget the dialog before wx does, so a late SimBrief answer is ignored."""
+        self._alive = False
+        return super().Destroy()
 
     def on_text_change(self, _):
         """

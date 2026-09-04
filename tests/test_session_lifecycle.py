@@ -242,7 +242,7 @@ def test_a_lost_and_restored_link_keeps_the_logon(logger):
 class FakeConnectDialog:
     """Stands in for ConnectDialog: answers OK with fixed details, never shows."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, fetch_simbrief=None):
         pass
 
     def ShowModal(self):

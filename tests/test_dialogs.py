@@ -7,7 +7,7 @@ sends malformed text to a controller.
 import pytest
 import wx
 
-from src.gui.dialogs import WeatherDialog
+from src.gui.dialogs import ConnectDialog, PDCDialog, WeatherDialog
 
 
 @pytest.fixture
@@ -87,3 +87,90 @@ def test_unchecking_survives_a_correction_to_the_icao(dialog):
     weather.icao_text.SetValue("EGKK")
 
     assert weather.get_weather_details() == ("EGKK", "vatatis", False)
+
+
+# --- SimBrief fills the Connect and PDC dialogs in after they open -------------
+
+
+class RecordingFetch:
+    """Stands in for MainWindow._fetch_simbrief: keeps the callback so the test can answer later."""
+
+    def __init__(self, configured=True):
+        self.configured = configured
+        self.on_done = None
+
+    def __call__(self, on_done):
+        if not self.configured:
+            return False
+        self.on_done = on_done
+        return True
+
+
+def test_the_connect_dialog_opens_before_simbrief_answers(frame):
+    """The fetch used to run inside the constructor, freezing the app for up
+    to ten seconds before the dialog appeared."""
+    fetch = RecordingFetch()
+    dialog = ConnectDialog(frame, fetch_simbrief=fetch)
+    try:
+        assert dialog.simbrief_status.GetLabel() == "Fetching SimBrief flight plan..."
+        assert dialog.callsign_text.GetValue() == ""
+
+        fetch.on_done({"atc": {"callsign": "BAW123"}})
+
+        assert dialog.callsign_text.GetValue() == "BAW123"
+        assert dialog.simbrief_status.GetLabel() == "Callsign taken from your SimBrief flight plan."
+    finally:
+        dialog.Destroy()
+
+
+def test_a_failed_simbrief_fetch_is_shown_in_the_dialog_not_a_message_box(frame, message_boxes):
+    fetch = RecordingFetch()
+    dialog = ConnectDialog(frame, fetch_simbrief=fetch)
+    try:
+        fetch.on_done(None)
+
+        assert dialog.simbrief_status.GetLabel() == "Could not fetch flight plan from SimBrief."
+        assert message_boxes.calls == []
+    finally:
+        dialog.Destroy()
+
+
+def test_a_simbrief_answer_after_the_dialog_closed_is_ignored(frame):
+    """The pilot may press OK or Cancel before SimBrief answers."""
+    fetch = RecordingFetch()
+    dialog = ConnectDialog(frame, fetch_simbrief=fetch)
+    dialog.Destroy()
+
+    fetch.on_done({"atc": {"callsign": "BAW123"}})
+
+
+def test_without_a_simbrief_id_the_connect_dialog_says_nothing(frame):
+    dialog = ConnectDialog(frame, fetch_simbrief=RecordingFetch(configured=False))
+    try:
+        assert dialog.simbrief_status.GetLabel() == ""
+    finally:
+        dialog.Destroy()
+
+
+def test_the_pdc_dialog_fills_its_fields_from_simbrief(frame):
+    fetch = RecordingFetch()
+    dialog = PDCDialog(frame, fetch_simbrief=fetch)
+    try:
+        assert dialog.simbrief_status.GetLabel() == "Fetching SimBrief flight plan..."
+
+        fetch.on_done(
+            {
+                "origin": {"icao_code": "EGLL"},
+                "destination": {"icao_code": "LIMC"},
+                "aircraft": {"icao_code": "A339"},
+            }
+        )
+
+        assert (
+            dialog.origin_icao_text.GetValue(),
+            dialog.destination_icao_text.GetValue(),
+            dialog.aircraft_text.GetValue(),
+        ) == ("EGLL", "LIMC", "A339")
+        assert dialog.simbrief_status.GetLabel() == "Flight plan loaded from SimBrief."
+    finally:
+        dialog.Destroy()

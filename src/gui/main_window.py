@@ -29,7 +29,7 @@ from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
 from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
-from src.model.network_worker import NetworkWorker, PRIORITY_LINK
+from src.model.network_worker import NetworkWorker, PRIORITY_INFO, PRIORITY_LINK
 from src.controller.link_state import LinkState
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
@@ -47,6 +47,7 @@ from src.gui.dialogs import (
 )
 from src.utils.weather_parsing import report_type_label
 from src.utils.update_checker import UpdateChecker
+from src.utils.simbrief import get_latest_ofp
 from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
@@ -340,7 +341,7 @@ class MainWindow(wx.Frame):
     def on_connect(self):
         """Ask for the connection details and connect on the worker."""
         self.logger.debug("Opening connection dialog")
-        dlg = ConnectDialog(self)
+        dlg = ConnectDialog(self, fetch_simbrief=self._fetch_simbrief)
         if dlg.ShowModal() == wx.ID_OK:
             callsign, logon_code, network_type = dlg.get_connection_details()
             self._begin_connect(callsign, logon_code, network_type)
@@ -783,6 +784,29 @@ class MainWindow(wx.Frame):
         )
         return False
 
+    def _fetch_simbrief(self, on_done):
+        """Fetch the latest SimBrief flight plan on the worker.
+
+        Args:
+            on_done: Callable(ofp_or_None), run on the GUI thread
+
+        Returns:
+            bool: True if a fetch was started, False when no SimBrief user id
+                is configured
+        """
+        user_id = load_config().get("simbrief_userid", "")
+        if not user_id:
+            return False
+
+        self.logger.debug(f"Fetching SimBrief OFP for user ID: {user_id}")
+        self.worker.submit(
+            "simbrief",
+            lambda: get_latest_ofp(user_id),
+            lambda result: on_done(result.value if result.ok else None),
+            PRIORITY_INFO,
+        )
+        return True
+
     def _send_callback(self, what):
         """Build the on_done for a downlink: echo it and speed up polling, or
         say why it failed.
@@ -1037,7 +1061,7 @@ class MainWindow(wx.Frame):
             return
 
         self.logger.debug("Opening PDC request dialog")
-        dlg = PDCDialog(self)
+        dlg = PDCDialog(self, fetch_simbrief=self._fetch_simbrief)
         if dlg.ShowModal() == wx.ID_OK:
             (
                 origin_icao,

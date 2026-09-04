@@ -5,7 +5,6 @@ Connect dialog for the Sim-CPDLC application.
 import wx
 import logging
 from src.config import load_config
-from src.utils.simbrief import get_latest_ofp
 
 
 class ConnectDialog(wx.Dialog):
@@ -13,21 +12,26 @@ class ConnectDialog(wx.Dialog):
     Dialog for connecting to the CPDLC network with callsign and logon code.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, fetch_simbrief=None):
         """
         Initialize the connect dialog.
 
         Args:
             parent: The parent window
+            fetch_simbrief: Callable(on_done) that fetches the latest SimBrief
+                flight plan off the GUI thread and calls on_done(ofp_or_None)
+                on it; returns False when no SimBrief id is configured. None
+                skips the fetch. The dialog opens at once either way and fills
+                the callsign in when the plan arrives.
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Connect", size=(-1, -1))
         self.logger = logging.getLogger("Sim-CPDLC")
+        self._alive = True
 
-        # Load config to get saved logon codes and SimBrief User ID
+        # Load config to get saved logon codes
         config = load_config()
         self.saved_sayintentions_logon_code = config.get("sayintentions_logon_code", "")
         self.saved_hoppie_logon_code = config.get("hoppie_logon_code", "")
-        simbrief_userid = config.get("simbrief_userid", "")
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
@@ -53,43 +57,12 @@ class ConnectDialog(wx.Dialog):
         vbox.Add(callsign_label, 0, wx.ALL, 5)
         self.callsign_text = wx.TextCtrl(self)
 
-        # Try to populate callsign from SimBrief if a user ID is available
-        if simbrief_userid:
-            self.logger.debug(
-                f"Attempting to fetch SimBrief OFP for user ID: {simbrief_userid}"
-            )
-            try:
-                ofp_data = get_latest_ofp(simbrief_userid)
-                if ofp_data:
-                    # Extract callsign from OFP data
-                    # The callsign is typically stored as airline code + flight number
-                    # For example: "WAT2088" = "WAT" (airline) + "2088" (flight number)
-                    atc = ofp_data.get("atc", {})
-                    callsign = atc.get("callsign", "")
-
-                    if callsign:
-                        self.logger.info(f"Found callsign in SimBrief OFP: {callsign}")
-                        self.callsign_text.SetValue(callsign)
-                    else:
-                        self.logger.warning(
-                            "Could not extract callsign from SimBrief OFP"
-                        )
-                else:
-                    self.logger.warning("Failed to fetch SimBrief OFP data")
-                    wx.MessageBox(
-                        "Could not fetch flight plan from SimBrief.",
-                        "SimBrief",
-                        wx.OK | wx.ICON_WARNING,
-                    )
-            except Exception as e:
-                self.logger.error(f"Error fetching SimBrief OFP: {str(e)}")
-                wx.MessageBox(
-                    f"Error fetching SimBrief data: {e}",
-                    "SimBrief",
-                    wx.OK | wx.ICON_WARNING,
-                )
-
         vbox.Add(self.callsign_text, 0, wx.ALL | wx.EXPAND, 5)
+
+        # The flight plan arrives after the dialog is open; this line says
+        # where it stands so a screen-reader user is not left guessing.
+        self.simbrief_status = wx.StaticText(self, label="")
+        vbox.Add(self.simbrief_status, 0, wx.ALL, 5)
 
         # Logon code field - create controls but manage visibility later
         self.logon_code_label = wx.StaticText(self, label="Logon code:")
@@ -123,6 +96,38 @@ class ConnectDialog(wx.Dialog):
 
         # Check if fields are valid on initialization
         self.on_text_change(None)
+
+        if fetch_simbrief is not None and fetch_simbrief(self._on_simbrief):
+            self.simbrief_status.SetLabel("Fetching SimBrief flight plan...")
+
+    def _on_simbrief(self, ofp_data):
+        """Fill the callsign in from the flight plan, if the dialog is still open.
+
+        Args:
+            ofp_data: The SimBrief OFP dict, or None when the fetch failed
+        """
+        if not self._alive:
+            return
+
+        # The callsign is airline code plus flight number, e.g. "WAT2088".
+        atc = (ofp_data or {}).get("atc") or {}
+        callsign = atc.get("callsign", "")
+        if callsign:
+            self.logger.info(f"Found callsign in SimBrief OFP: {callsign}")
+            self.callsign_text.SetValue(callsign)
+            self.simbrief_status.SetLabel("Callsign taken from your SimBrief flight plan.")
+        else:
+            self.logger.warning("Could not fetch flight plan from SimBrief")
+            self.simbrief_status.SetLabel("Could not fetch flight plan from SimBrief.")
+
+        self.on_text_change(None)
+        self.Layout()
+        self.Fit()
+
+    def Destroy(self):
+        """Forget the dialog before wx does, so a late SimBrief answer is ignored."""
+        self._alive = False
+        return super().Destroy()
 
     def update_logon_code_visibility(self):
         """
