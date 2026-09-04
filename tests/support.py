@@ -48,11 +48,19 @@ class InlineWorker(NetworkWorker):
     re-raised once the queue has drained: in the application wx.CallAfter
     only schedules the callback, so its exception surfaces later in the event
     loop rather than inside the worker, and a test must see it the same way.
+    Pacing is simulated on a FakeClock, so no test waits on a real sleep.
     """
 
     def __init__(self, logger):
         self.errors = []
-        super().__init__(logger, dispatch=self._dispatch_inline, start_thread=False)
+        self.clock = FakeClock()
+        super().__init__(
+            logger,
+            dispatch=self._dispatch_inline,
+            start_thread=False,
+            clock=self.clock,
+            sleep=self.clock.advance,
+        )
 
     def _dispatch_inline(self, fn, *args):
         try:

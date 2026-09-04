@@ -75,10 +75,14 @@ class MainWindow(wx.Frame):
         self.logger = logger
         self.logger.debug("Initializing MainWindow")
 
+        # One thread for every network call, so the GUI thread never waits on
+        # the network and every result comes back through the event loop.
+        self.worker = NetworkWorker(logger)
+
         # Initialize model components
         self.connection_manager = ConnectionManager(logger)
         self.message_manager = MessageManager(logger)
-        self.cpdlc_session = CpdlcSession(logger, self.connection_manager)
+        self.cpdlc_session = CpdlcSession(logger, self.connection_manager, worker=self.worker)
         self.simconnect_manager = SimConnectManager()
 
         # Check if this is the first launch (config file just created)
@@ -107,10 +111,6 @@ class MainWindow(wx.Frame):
             self.update_checker.check_for_updates()
         else:
             self.logger.debug("Auto-update check disabled")
-
-        # One thread for every network call, so the GUI thread never waits on
-        # the network and every result comes back through the event loop.
-        self.worker = NetworkWorker(logger)
 
         # Initialize controller
         self.polling_controller = PollingController(

@@ -223,13 +223,16 @@ def test_the_real_window_never_reaches_the_simulator(window):
 def test_the_real_window_listens_to_its_polling_controller(window):
     """The link, unreadable and tick callbacks are how a lost link, a dropped
     uplink and an unanswered logon reach the message list at all, and the
-    worker is where every poll runs."""
+    worker is where every poll runs. The session and the weather monitor send
+    through the same worker."""
     controller = window.polling_controller
 
     assert controller.link_callback == window._on_link_change
     assert controller.unreadable_callback == window._on_unreadable_messages
     assert controller.tick_callback == window._on_poll_tick
     assert controller.worker is window.worker
+    assert window.cpdlc_session.worker is window.worker
+    assert window.weather_monitor.worker is window.worker
 
 
 # --- the message list ---------------------------------------------------------
