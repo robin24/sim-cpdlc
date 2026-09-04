@@ -31,7 +31,7 @@ starts a thread on purpose.
 | --- | --- |
 | `test_about_dialog.py` | The About box: the "(source)" label and the copyright year |
 | `test_acknowledge_path.py` | Responding to an uplink, end to end from the window, queued on the worker, down to the frame |
-| `test_config.py` | Reading, writing and clamping the configuration |
+| `test_config.py` | Reading, writing and clamping the configuration; what the log says about it |
 | `test_connection_manager.py` | The network boundary: errors, timeouts, poll results, unreadable uplinks, the wire packets |
 | `test_cpdlc_session.py` | Session state: logon acceptance and rejection, the handover window, pending expiry, reset and identity |
 | `test_dialogs.py` | The weather request dialog's validation; the Connect and PDC dialogs filling in from SimBrief; the Settings, Connect and PDC getters returning stripped fields |
@@ -41,6 +41,7 @@ starts a thread on purpose.
 | `test_harness.py` | The hermetic fixtures themselves |
 | `test_link_state.py` | The link state machine and its back-off ladder |
 | `test_link_status.py` | How the window announces a lost, restored or fatal link and unreadable uplinks |
+| `test_logging_setup.py` | The log handlers: the file always, the console only when there is one; SimBrief's logger |
 | `test_logon_status.py` | Logon state as reported to the user, including a logon nobody answered |
 | `test_main_window.py` | The real window: menu bindings, message list, weather toggles, settings |
 | `test_main_window_wiring.py` | `_init_ui` alone, on a stripped-down frame |

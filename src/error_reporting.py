@@ -15,6 +15,8 @@ import traceback
 
 import wx
 
+from src.model.connection_manager import redact
+
 
 class ExceptionReporter:
     """Routes otherwise-unhandled exceptions to the log and to one dialog."""
@@ -42,12 +44,11 @@ class ExceptionReporter:
             exc_tb: Traceback, or None
             source: Where it came from, for the log line
         """
-        self.logger.error(
-            f"Unhandled exception in {source}: {exc_type.__name__}: {exc_value}\n"
-            + "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        )
+        summary = redact(f"{exc_type.__name__}: {exc_value}")
+        details = redact("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+        self.logger.error(f"Unhandled exception in {source}: {summary}\n{details}")
         text = (
-            f"An unexpected error occurred:\n\n{exc_type.__name__}: {exc_value}\n\n"
+            f"An unexpected error occurred:\n\n{summary}\n\n"
             "The details have been written to the log file."
         )
         if wx.GetApp() is None:

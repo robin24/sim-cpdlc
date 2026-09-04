@@ -5,7 +5,9 @@ import json
 import logging
 from typing import Dict, Optional, Any
 
-logger = logging.getLogger(__name__)
+# A child of the application logger, so the reason a fetch failed reaches the
+# log file next to the dialog's one-line summary.
+logger = logging.getLogger("Sim-CPDLC.simbrief")
 
 
 class SimBriefAPI:

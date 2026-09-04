@@ -4,6 +4,7 @@ load_config fills in missing keys but validates neither type nor range, so a
 hand-edited or downgrade-written file reaches the application as-is.
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from src.config import (
     save_config,
     weather_interval_minutes,
 )
+from src import config as config_module
 
 
 def test_a_configured_interval_is_used_as_given():
@@ -99,3 +101,25 @@ def test_a_failed_write_leaves_the_previous_file_and_no_temp_file_behind(
     assert save_config({**DEFAULT_CONFIG, "simbrief_userid": "after"}) is False
     assert load_config()["simbrief_userid"] == "before"
     assert [path.name for path in Path(isolated_config).parent.iterdir()] == ["config.json"]
+
+
+def test_the_log_names_the_settings_but_not_their_values(caplog):
+    """DEBUG is the level a user is asked to switch on for troubleshooting, and
+    it used to print both logon codes (audit L-8)."""
+    with caplog.at_level(logging.DEBUG, logger="Sim-CPDLC"):
+        assert save_config({**DEFAULT_CONFIG, "hoppie_logon_code": "SECRET42"})
+        load_config()
+
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "hoppie_logon_code" in joined
+    assert "SECRET42" not in joined
+
+
+def test_saving_creates_the_settings_directory(monkeypatch, tmp_path):
+    """The directory used to be created when src.config was imported, on every
+    test run and on every machine that merely imported the module."""
+    monkeypatch.setattr(config_module, "CONFIG_FILE", str(tmp_path / "fresh" / "config.json"))
+
+    assert save_config(dict(DEFAULT_CONFIG))
+
+    assert (tmp_path / "fresh" / "config.json").is_file()

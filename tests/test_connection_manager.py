@@ -11,6 +11,7 @@ these tests fail if hoppie_connector changes what it raises.
 """
 
 import logging
+import traceback
 
 import pytest
 import requests
@@ -548,3 +549,21 @@ def test_an_explicit_timeout_still_wins(monkeypatch):
     requests.get("https://example.invalid/", timeout=1)
 
     assert seen["timeout"] == 1
+
+
+def test_a_transport_failure_keeps_the_logon_code_out_of_the_traceback(logger, monkeypatch):
+    """redact() scrubbed the message, but the original requests exception
+    stayed attached as __cause__ and traceback formatting printed its URL,
+    logon code included (audit L-8)."""
+    cm = connected(logger, monkeypatch)
+    serving(
+        monkeypatch,
+        raises=requests.ConnectionError(f"HTTPSConnectionPool: {HOPPIE_API_URL}?logon={LOGON}&from=DLH123"),
+    )
+
+    with pytest.raises(HoppieError) as raised:
+        cm.send_telex("EDDF", "HELLO")
+
+    rendered = "".join(traceback.format_exception(raised.value))
+    assert LOGON not in rendered
+    assert raised.value.__cause__ is None
