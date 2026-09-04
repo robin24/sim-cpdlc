@@ -8,6 +8,7 @@ from src.model.cpdlc_elements import (
     REASON_AIRCRAFT_PERFORMANCE,
     REASON_WEATHER,
 )
+from src.gui.dialogs.validation import KNOTS, MACH, matches, pad_three
 
 
 class SpeedRequestDialog(wx.Dialog):
@@ -81,42 +82,34 @@ class SpeedRequestDialog(wx.Dialog):
             )
         else:
             self.helper_text.SetLabel(
-                "Enter speed in knots (e.g. 300)"
+                "Enter speed in knots, 3 digits (e.g. 300)"
             )
         self.on_text_change(None)
 
-    def on_text_change(self, _):
-        """Enable OK button if speed value is valid."""
-        speed = self.speed_text.GetValue().strip()
-        if not speed.isdigit():
-            self.ok_button.Disable()
-            return
+    def _rule(self):
+        """The validation rule for the selected speed type."""
+        return MACH if self.radio_mach.GetValue() else KNOTS
 
-        if self.radio_mach.GetValue():
-            # Mach: 2-3 digits (e.g. 82, 082)
-            if 2 <= len(speed) <= 3:
-                self.ok_button.Enable()
-            else:
-                self.ok_button.Disable()
-        else:
-            # Knots: 2-3 digits (e.g. 250, 300)
-            if 2 <= len(speed) <= 3:
-                self.ok_button.Enable()
-            else:
-                self.ok_button.Disable()
+    def _speed(self):
+        """The speed as typed, without surrounding whitespace."""
+        return self.speed_text.GetValue().strip()
+
+    def on_text_change(self, _):
+        """Enable OK only for a value that fits the selected speed type."""
+        self.ok_button.Enable(matches(self._rule(), self._speed()))
 
     def get_speed_details(self):
         """Get the speed request details.
 
         Returns:
-            tuple: (speed, is_mach, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
+            tuple: (speed, is_mach, reason) where speed is three digits and
+                reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
-        speed = self.speed_text.GetValue().strip()
+        speed = self._speed()
         is_mach = self.radio_mach.GetValue()
 
-        # Pad Mach to 3 digits if needed (e.g. 82 -> 082)
-        if is_mach and len(speed) == 2:
-            speed = "0" + speed
+        if is_mach:
+            speed = pad_three(speed)
 
         reason = None
         if self.reason_weather.GetValue():

@@ -10,21 +10,6 @@ import wx
 from src.gui.dialogs import ConnectDialog, PDCDialog, WeatherDialog
 
 
-@pytest.fixture
-def dialog(frame):
-    """Builds a dialog and destroys it, whatever the test does to it."""
-    built = []
-
-    def build(factory, *args, **kwargs):
-        instance = factory(frame, *args, **kwargs)
-        built.append(instance)
-        return instance
-
-    yield build
-    for instance in built:
-        instance.Destroy()
-
-
 def _fire_auto_update_toggle(weather):
     """Check or uncheck the auto-update box the way a user actually does.
 

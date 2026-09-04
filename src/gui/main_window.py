@@ -512,15 +512,6 @@ class MainWindow(wx.Frame):
 
             station = dlg.get_logon_details()
 
-            # Validate station name is exactly 4 characters
-            if len(station) != 4:
-                self._message_box(
-                    "Station name must be exactly 4 characters long.",
-                    "Invalid Station Name",
-                    wx.OK | wx.ICON_ERROR,
-                )
-                return
-
             previous = self.cpdlc_session.get_current_station()
             self.SetStatusText(f"Logging on to {station}...")
             queued = self.cpdlc_session.logon(

@@ -4,6 +4,8 @@ Logon dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.gui.dialogs.validation import STATION, matches
+
 
 class LogonDialog(wx.Dialog):
     """
@@ -41,20 +43,19 @@ class LogonDialog(wx.Dialog):
 
         self.station_text.Bind(wx.EVT_TEXT, self.on_text_change)
 
+    def _station(self):
+        """The station as it would be sent: stripped and upper-cased."""
+        return self.station_text.GetValue().strip().upper()
+
     def on_text_change(self, _):
-        """
-        Enable the OK button if station is exactly 4 characters.
-        """
-        if len(self.station_text.GetValue().strip()) == 4:
-            self.ok_button.Enable()
-        else:
-            self.ok_button.Disable()
+        """Enable OK only for a station name the network accepts."""
+        self.ok_button.Enable(matches(STATION, self._station()))
 
     def get_logon_details(self):
         """
         Get the logon details entered by the user.
 
         Returns:
-            str: The station name
+            str: The station name, stripped and upper-cased
         """
-        return self.station_text.GetValue().upper()
+        return self._station()
