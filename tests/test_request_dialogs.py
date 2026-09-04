@@ -14,6 +14,7 @@ from src.gui.dialogs import (
     DirectRequestDialog,
     LogonDialog,
     SpeedRequestDialog,
+    TelexDialog,
     WhenCanWeDialog,
 )
 from src.model.cpdlc_elements import REASON_WEATHER
@@ -270,3 +271,77 @@ def test_a_request_with_a_value_applies_the_rule_for_its_type(dialog, index, typ
     assert when.ok_button.IsEnabled() is enabled
     if enabled:
         assert when.get_message_text() == text
+
+
+# --- telex --------------------------------------------------------------------
+
+
+@pytest.fixture
+def telex(dialog, frame):
+    """A Telex dialog whose parent window claims to be logged on to EDDF."""
+    frame.get_current_station = lambda: "EDDF"
+    return dialog(TelexDialog)
+
+
+def test_the_recipient_starts_as_the_current_station(telex):
+    assert telex.recipient_text.GetValue() == "EDDF"
+    assert telex.counter_text.GetLabel() == "0 / 220 characters"
+    assert telex.ok_button.IsEnabled() is False
+
+
+def test_the_counter_follows_the_message(telex):
+    telex.message_text.SetValue("REQUEST OCEANIC CLEARANCE")
+
+    assert telex.counter_text.GetLabel() == "25 / 220 characters"
+    assert telex.ok_button.IsEnabled() is True
+
+
+def test_a_message_at_the_limit_is_allowed(telex):
+    telex.message_text.SetValue("A" * 220)
+
+    assert telex.counter_text.GetLabel() == "220 / 220 characters"
+    assert telex.ok_button.IsEnabled() is True
+
+
+def test_a_message_over_the_limit_is_refused_with_the_overrun(telex):
+    """The limit used to surface only after OK, as a send failure."""
+    telex.message_text.SetValue("A" * 221)
+
+    assert telex.counter_text.GetLabel() == "221 / 220 characters. Too long by 1."
+    assert telex.ok_button.IsEnabled() is False
+
+
+def test_non_ascii_text_is_refused_with_a_reason(telex):
+    telex.message_text.SetValue("GR\u00dcSSE AUS FRANKFURT")
+
+    assert telex.counter_text.GetLabel() == (
+        "20 / 220 characters. Only plain ASCII text can be sent."
+    )
+    assert telex.ok_button.IsEnabled() is False
+
+
+@pytest.mark.parametrize(
+    "recipient, enabled",
+    [
+        ("EDDF", True),
+        (" eddf ", True),
+        ("EDDFZQZX", True),
+        ("ED", False),
+        ("EDDFZQZXA", False),
+        ("ED DF", False),
+        ("", False),
+    ],
+)
+def test_the_recipient_must_be_a_station_name(telex, recipient, enabled):
+    telex.message_text.SetValue("HELLO")
+
+    telex.recipient_text.SetValue(recipient)
+
+    assert telex.ok_button.IsEnabled() is enabled
+
+
+def test_the_telex_is_returned_stripped_and_upper_cased(telex):
+    telex.recipient_text.SetValue(" eddf ")
+    telex.message_text.SetValue("  request oceanic clearance \n")
+
+    assert telex.get_telex_details() == ("EDDF", "REQUEST OCEANIC CLEARANCE")
