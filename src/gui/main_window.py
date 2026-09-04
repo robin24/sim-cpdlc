@@ -129,6 +129,9 @@ class MainWindow(wx.Frame):
         # answer to the same uplink is refused until the first has gone out
         # (or failed).
         self._responses_in_flight = {}
+        # True while a connect or disconnect job is out; every handler that
+        # needs the connection refuses until it reports.
+        self._link_busy = False
         # Named once per episode; reset to False whenever the link recovers.
         self._callsign_clash_announced = False
 
@@ -353,6 +356,7 @@ class MainWindow(wx.Frame):
             network_type: "sayintentions" or "hoppie"
         """
         self.menu_item_connect.Enable(False)
+        self._link_busy = True
         self.SetStatusText(f"Connecting as {callsign}...")
         self.worker.submit(
             "connect",
@@ -370,6 +374,7 @@ class MainWindow(wx.Frame):
             result: The worker's JobResult
         """
         self.menu_item_connect.Enable(True)
+        self._link_busy = False
         if not result.ok:
             self.SetStatusText("Not connected.")
             wx.MessageBox(
@@ -424,6 +429,7 @@ class MainWindow(wx.Frame):
 
         self.logger.info("Disconnecting from CPDLC network")
         self.menu_item_connect.Enable(False)
+        self._link_busy = True
         self.SetStatusText("Disconnecting...")
         self._end_dialogue()
 
@@ -448,9 +454,12 @@ class MainWindow(wx.Frame):
         self.worker.new_generation()
         # Their results were just dropped with the generation.
         self._responses_in_flight.clear()
+        # Belt and braces: nothing queued during the disconnect may leave a dialogue behind.
+        self.cpdlc_session.reset()
 
         # Update UI
         self.menu_item_connect.Enable(True)
+        self._link_busy = False
         self.menu_item_connect.SetItemLabel("&Connect")
         self.menu_item_connect.SetHelp("Connect to the CPDLC network")
         self.SetStatusText("Disconnected from CPDLC network.")
@@ -620,12 +629,7 @@ class MainWindow(wx.Frame):
     def on_altitude_change(self, _):
         """Send altitude change request to current station."""
         # Check if connected and logged on
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to request an altitude change.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("request an altitude change"):
             return
 
         if not self.cpdlc_session.is_logged_on():
@@ -652,12 +656,7 @@ class MainWindow(wx.Frame):
 
     def on_direct_request(self, _):
         """Send a direct-to waypoint request."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
@@ -683,12 +682,7 @@ class MainWindow(wx.Frame):
 
     def on_speed_request(self, _):
         """Send a speed/Mach change request."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
@@ -714,12 +708,7 @@ class MainWindow(wx.Frame):
 
     def on_when_can_we_expect(self, _):
         """Send a when-can-we-expect inquiry."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
@@ -758,12 +747,7 @@ class MainWindow(wx.Frame):
     def on_telex(self, _):
         """Send a telex message to specified recipient."""
         # Check if connected to the network
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a telex message.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a telex message"):
             return
 
         self.logger.debug("Opening telex dialog")
@@ -789,7 +773,7 @@ class MainWindow(wx.Frame):
         Returns:
             bool: True if connected
         """
-        if self.connection_manager.is_connected():
+        if self.connection_manager.is_connected() and not self._link_busy:
             return True
 
         wx.MessageBox(
@@ -1049,12 +1033,7 @@ class MainWindow(wx.Frame):
     def on_pdc_request(self, _):
         """Request a pre-departure clearance from departure airport."""
         # Check if connected to the network
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to request a PDC.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("request a PDC"):
             return
 
         self.logger.debug("Opening PDC request dialog")

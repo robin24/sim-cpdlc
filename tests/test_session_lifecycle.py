@@ -130,6 +130,44 @@ def test_a_cancelled_disconnect_changes_nothing(logger, message_boxes):
     assert connection.disconnected is False
 
 
+def test_a_request_during_the_disconnect_window_is_refused(logger, monkeypatch, message_boxes):
+    """Between Disconnect and the disconnect job reporting, is_connected() is
+    still True; a logon queued then would go out ahead of the disconnect and
+    leave a pending logon behind for the next session."""
+    monkeypatch.setattr(mw, "LogonDialog", FakeLogonDialog)
+    window, session, connection, _ = build(logger)
+    window.on_disconnect()
+
+    window.on_logon(None)
+
+    assert message_boxes.captions[-1] == "Not Connected"
+    assert session.pending_logon_station is None
+
+    window.worker.run_pending()
+
+    assert [frame[3] for frame in connection.sent] == ["LOGOFF"]
+    assert window._link_busy is False
+
+
+def test_every_connection_gated_handler_refuses_while_the_link_is_busy(logger, message_boxes):
+    window, _, _, _ = build(logger)
+    window._link_busy = True
+
+    for handler in (
+        window.on_logon,
+        window.on_altitude_change,
+        window.on_direct_request,
+        window.on_speed_request,
+        window.on_when_can_we_expect,
+        window.on_telex,
+        window.on_weather_request,
+        window.on_pdc_request,
+    ):
+        handler(None)
+
+    assert message_boxes.captions == ["Not Connected"] * 8
+
+
 # --- exit ---------------------------------------------------------------------
 
 
