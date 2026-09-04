@@ -6,6 +6,7 @@ import re
 import sys
 import webbrowser
 from contextlib import contextmanager
+from pathlib import Path
 
 import wx
 import wx.adv
@@ -55,19 +56,33 @@ from src.gui.dialogs.settings_dialog import SettingsDialog
 # networks wrap it in have been flattened to spaces by then.
 HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+([A-Z]{4})$")
 
+# The directory that holds app.py, src/ and assets/: two levels above this
+# file. A frozen build unpacks the same layout into sys._MEIPASS.
+_SOURCE_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def resource_path(relative_path):
+    """Absolute path of a bundled file, in a checkout or a PyInstaller build.
+
+    The working directory plays no part: a checkout started from another
+    folder used to lose its notification sound and warn about it on every
+    start.
+
+    Args:
+        relative_path: Path below the source root, e.g. "assets/message.wav"
+
+    Returns:
+        str: The absolute path
+    """
+    if getattr(sys, "frozen", False):
+        base_path = getattr(sys, "_MEIPASS", _SOURCE_ROOT)
+    else:
+        base_path = _SOURCE_ROOT
+    return os.path.join(base_path, relative_path)
+
 
 class MainWindow(wx.Frame):
     """Main application window for the Sim-CPDLC client."""
-
-    def resource_path(self, relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller."""
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-        except Exception:
-            base_path = os.path.abspath(".")
-
-        return os.path.join(base_path, relative_path)
 
     def __init__(self, parent, title, logger):
         """Initialize the main window with UI and connection settings."""
@@ -92,7 +107,7 @@ class MainWindow(wx.Frame):
         self.simconnect_manager = SimConnectManager()
 
         # Initialize sound for new messages
-        sound_path = self.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
+        sound_path = resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
         if os.path.exists(sound_path):
             self.new_message_sound = wx.adv.Sound(sound_path)
         else:

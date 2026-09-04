@@ -9,13 +9,14 @@ Distinct from test_main_window_wiring.py, which runs _init_ui alone on a
 stripped-down frame; this builds the whole window.
 """
 
+import os
 import sys
 
 import pytest
 import wx
 
 import src.gui.main_window as mw
-from src.config import DEFAULT_CONFIG, save_config
+from src.config import DEFAULT_CONFIG, MESSAGE_SOUND_FILENAME, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
@@ -511,3 +512,34 @@ def test_a_failed_save_changes_nothing(window, monkeypatch, message_boxes):
     assert window.weather_monitor.interval_ms == interval_before
     assert window._auto_tune_com1 is True
     assert message_boxes.captions[-1] == "Error"
+
+
+# --- bundled files -------------------------------------------------------------
+
+
+def test_the_sound_is_found_from_any_working_directory(monkeypatch, tmp_path):
+    """python C:\\...\\app.py run from another folder used to warn that the
+    sound was missing, because the lookup went through the working directory."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    path = mw.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
+
+    assert os.path.isfile(path)
+
+
+def test_a_frozen_build_looks_in_the_unpacked_bundle(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert mw.resource_path("assets/message.wav") == os.path.join(
+        str(tmp_path), "assets/message.wav"
+    )
+
+
+def test_the_window_loads_its_sound_from_another_working_directory(build_window, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    window = build_window()
+
+    assert window.new_message_sound is not None
