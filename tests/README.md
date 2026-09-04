@@ -48,6 +48,7 @@ starts a thread on purpose.
 | `test_message_view.py` | The message list, its column layout and its response context menu |
 | `test_network_worker.py` | The network worker: ordering, generations, pacing, failure capture, shutdown |
 | `test_polling_controller.py` | Poll intervals, polls on the worker, the back-off ladder while the link is lost, batch delivery, the tick callback |
+| `test_release.py` | The three version strings agree, the build tools stay out of the runtime requirements, the release workflow tests before it builds |
 | `test_request_dialogs.py` | The OK-button rules and the returned values of the logon, altitude, direct-to, speed, when-can-we and telex dialogs, including the telex character count |
 | `test_session_lifecycle.py` | Connect, disconnect and exit through the worker; a rejected logon code; a lost link is not a disconnect |
 | `test_simconnect_manager.py` | The SimConnect tune path: no connecting on its own, the simulator's answer believed |
