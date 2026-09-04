@@ -9,6 +9,8 @@ Distinct from test_main_window_wiring.py, which runs _init_ui alone on a
 stripped-down frame; this builds the whole window.
 """
 
+import sys
+
 import pytest
 import wx
 
@@ -17,7 +19,7 @@ from src.config import DEFAULT_CONFIG, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
-from tests.support import FakeSimConnectManager
+from tests.support import FakeConnectionManager, FakeSimConnectManager
 
 # Which handler each menu item must fire. Every handler is replaced on the
 # class before the window is built, so the Bind() calls in _init_menu pick up
@@ -57,11 +59,11 @@ def build_window(logger, wx_app, isolated_config, message_boxes):
     """
     built = []
 
-    def build():
+    def build(**overrides):
         # Writing the config file first keeps _check_first_launch() from
         # asking anything at all; the message_dialogs recorder is the safety
         # net if that ever stops being true.
-        assert save_config({**DEFAULT_CONFIG, "auto_check_updates": False})
+        assert save_config({**DEFAULT_CONFIG, "auto_check_updates": False, **overrides})
         window = mw.MainWindow(None, "Sim-CPDLC test", logger)
         window.Hide()
         # A real SimConnectManager would try to reach a running MSFS; swap in
@@ -386,3 +388,69 @@ def test_the_weather_dialog_always_opens_on_atis(window):
         assert dialog.get_weather_details()[1] == "vatatis"
     finally:
         dialog.Destroy()
+
+
+# --- open dialogs are counted --------------------------------------------------
+
+
+def test_every_dialog_is_counted_while_it_is_open(window, monkeypatch):
+    """The update prompt waits for _modal_depth to reach zero, so every dialog
+    the window opens must be counted while ShowModal runs; a handler that
+    bypassed _show_dialog would let the prompt pop over its dialog (audit M-5)."""
+    depths = []
+
+    def counted_show_modal(dialog):
+        depths.append(window._modal_depth)
+        return wx.ID_CANCEL
+
+    # Every dialog class is a Python subclass of wx.Dialog, so one patch
+    # covers them all.
+    monkeypatch.setattr(wx.Dialog, "ShowModal", counted_show_modal)
+    window.connection_manager = FakeConnectionManager()
+    window.cpdlc_session.connection_manager = window.connection_manager
+    window.cpdlc_session.handle_logon_accepted("EDYY")
+    window.weather_monitor.subscribe("EGLL", "metar")
+
+    window.on_connect()
+    for handler in (
+        window.on_settings,
+        window.on_pdc_request,
+        window.on_logon,
+        window.on_altitude_change,
+        window.on_direct_request,
+        window.on_speed_request,
+        window.on_when_can_we_expect,
+        window.on_telex,
+        window.on_weather_request,
+        window.on_weather_subscriptions,
+    ):
+        handler(None)
+
+    assert len(depths) == 11
+    assert all(depth >= 1 for depth in depths)
+    assert window._modal_depth == 0
+
+
+# --- the automatic update check ------------------------------------------------
+
+
+def test_the_automatic_update_check_is_skipped_when_running_from_source(build_window, monkeypatch):
+    """A developer running from a checkout is not a user to tell about
+    releases, and the check would hit GitHub on every start."""
+    checks = []
+    monkeypatch.setattr(mw.UpdateChecker, "check", lambda self, on_done: checks.append(on_done))
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    build_window(auto_check_updates=True)
+
+    assert checks == []
+
+
+def test_the_automatic_update_check_runs_in_a_packaged_build(build_window, monkeypatch):
+    checks = []
+    monkeypatch.setattr(mw.UpdateChecker, "check", lambda self, on_done: checks.append(on_done))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    window = build_window(auto_check_updates=True)
+
+    assert checks == [window._on_auto_update_check]

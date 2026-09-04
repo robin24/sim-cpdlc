@@ -387,6 +387,8 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window._responses_in_flight = {}
     window._link_busy = False
     window._callsign_clash_announced = False
+    window._modal_depth = 0
+    window.pending_update = None
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.
