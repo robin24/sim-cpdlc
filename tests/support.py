@@ -6,7 +6,7 @@ These are helpers, not fixtures: import them explicitly with
 
 import wx
 
-from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
+from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR, HoppieError
 
 from src.config import DEFAULT_CONFIG, save_config
 from src.model.connection_manager import PollResult
@@ -92,11 +92,13 @@ class FakeConnectionManager:
         connected: What is_connected() reports
         raise_with: An exception every send raises instead of recording, for
             exercising the failure paths
+        connect_error: An exception connect() raises instead of connecting
     """
 
-    def __init__(self, connected=True, raise_with=None):
+    def __init__(self, connected=True, raise_with=None, connect_error=None):
         self._connected = connected
         self.raise_with = raise_with
+        self.connect_error = connect_error
         self.sent = []
         self.telexes = []
         self.info_requests = []
@@ -108,6 +110,8 @@ class FakeConnectionManager:
         return self._connected
 
     def connect(self, callsign, logon_code, network_type):
+        if self.connect_error is not None:
+            raise self.connect_error
         self._connected = True
         self.connected_as = (callsign, network_type)
 
@@ -116,16 +120,22 @@ class FakeConnectionManager:
         self.disconnected = True
 
     def send_cpdlc(self, recipient, min_value, response_type, message, mrn=None):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.sent.append((recipient, min_value, response_type, message, mrn))
 
     def send_telex(self, recipient, message):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.telexes.append((recipient, message))
 
     def send_info_request(self, info_type, icao):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.info_requests.append((info_type, icao))
@@ -225,17 +235,24 @@ class FakeWeatherMonitor:
 
 
 class FakeMenuItem:
-    """Records the label and help text the window sets on a menu item."""
+    """Records the label, help text and enabled state the window sets on a menu item."""
 
     def __init__(self, label="&Disconnect"):
         self.label = label
         self.help = ""
+        self.enabled = True
 
     def SetItemLabel(self, label):
         self.label = label
 
     def SetHelp(self, text):
         self.help = text
+
+    def Enable(self, enable=True):
+        self.enabled = enable
+
+    def IsEnabled(self):
+        return self.enabled
 
 
 class FakeSound:

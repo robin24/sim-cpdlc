@@ -29,7 +29,7 @@ from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
 from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
-from src.model.network_worker import NetworkWorker
+from src.model.network_worker import NetworkWorker, PRIORITY_LINK
 from src.controller.link_state import LinkState
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
@@ -335,38 +335,65 @@ class MainWindow(wx.Frame):
             self.on_disconnect()
 
     def on_connect(self):
-        """Establish connection to the CPDLC network."""
+        """Ask for the connection details and connect on the worker."""
         self.logger.debug("Opening connection dialog")
         dlg = ConnectDialog(self)
         if dlg.ShowModal() == wx.ID_OK:
             callsign, logon_code, network_type = dlg.get_connection_details()
-
-            try:
-                self.connection_manager.connect(callsign, logon_code, network_type)
-            except HoppieError as exc:
-                wx.MessageBox(
-                    f"Connection failed: {exc}",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-            else:
-                # Start polling and automatic weather updates
-                self.polling_controller.start(self)
-                self.weather_monitor.start(self)
-
-                # Hand the identity to the session; a different callsign or
-                # network starts a clean dialogue, the same one keeps the logon
-                self.cpdlc_session.begin_session(callsign, network_type)
-
-                # Update UI
-                self.SetStatusText(f"Connected as {callsign}.")
-                self.menu_item_connect.SetItemLabel("&Disconnect")
-                self.menu_item_connect.SetHelp("Disconnect from the CPDLC network")
-
-                # Add system message
-                self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
+            self._begin_connect(callsign, logon_code, network_type)
 
         dlg.Destroy()
+
+    def _begin_connect(self, callsign, logon_code, network_type):
+        """Submit the connection attempt; the menu item stays disabled until it reports.
+
+        Args:
+            callsign: Aircraft callsign
+            logon_code: CPDLC logon code
+            network_type: "sayintentions" or "hoppie"
+        """
+        self.menu_item_connect.Enable(False)
+        self.SetStatusText(f"Connecting as {callsign}...")
+        self.worker.submit(
+            "connect",
+            lambda: self.connection_manager.connect(callsign, logon_code, network_type),
+            functools.partial(self._on_connect_result, callsign, network_type),
+            PRIORITY_LINK,
+        )
+
+    def _on_connect_result(self, callsign, network_type, result):
+        """Finish a connection attempt. Runs on the GUI thread.
+
+        Args:
+            callsign: The callsign the attempt was made with
+            network_type: The network it was made on
+            result: The worker's JobResult
+        """
+        self.menu_item_connect.Enable(True)
+        if not result.ok:
+            self.SetStatusText("Not connected.")
+            wx.MessageBox(
+                f"Connection failed: {result.error}",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        # Start polling and automatic weather updates
+        self.polling_controller.start(self)
+        self.weather_monitor.start(self)
+
+        # Hand the identity to the session; a different callsign or
+        # network starts a clean dialogue, the same one keeps the logon
+        self.cpdlc_session.begin_session(callsign, network_type)
+
+        # Update UI
+        self.SetStatusText(f"Connected as {callsign}.")
+        self.menu_item_connect.SetItemLabel("&Disconnect")
+        self.menu_item_connect.SetHelp("Disconnect from the CPDLC network")
+
+        # Add system message
+        self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
 
     def on_disconnect(self):
         """Disconnect from the CPDLC network."""
@@ -396,6 +423,8 @@ class MainWindow(wx.Frame):
             return
 
         self.logger.info("Disconnecting from CPDLC network")
+        self.menu_item_connect.Enable(False)
+        self.SetStatusText("Disconnecting...")
         self._end_dialogue()
 
         # Stop polling and automatic weather updates
@@ -403,10 +432,25 @@ class MainWindow(wx.Frame):
         self.weather_monitor.stop()
         self.weather_monitor.clear()
 
-        # Disconnect
-        self.connection_manager.disconnect()
+        # The LOGOFF queued by _end_dialogue runs at a higher priority than
+        # this, so the connection is only closed once it has gone out.
+        self.worker.submit(
+            "disconnect", self.connection_manager.disconnect, self._on_disconnected, PRIORITY_LINK
+        )
+
+    def _on_disconnected(self, result):
+        """Finish a disconnect once the LOGOFF has had its turn. Runs on the GUI thread.
+
+        Args:
+            result: The worker's JobResult (disconnect() cannot fail)
+        """
+        # Anything still queued belonged to the old session.
+        self.worker.new_generation()
+        # Their results were just dropped with the generation.
+        self._responses_in_flight.clear()
 
         # Update UI
+        self.menu_item_connect.Enable(True)
         self.menu_item_connect.SetItemLabel("&Connect")
         self.menu_item_connect.SetHelp("Connect to the CPDLC network")
         self.SetStatusText("Disconnected from CPDLC network.")
@@ -956,6 +1000,10 @@ class MainWindow(wx.Frame):
         """
         self.logger.error(f"Disconnecting after a fatal link error: {reason}")
         self.polling_controller.stop()
+        # Nothing queued for this session may run or report now.
+        self.worker.new_generation()
+        # Their results were just dropped with the generation.
+        self._responses_in_flight.clear()
         self.weather_monitor.stop()
         self.weather_monitor.clear()
         self.connection_manager.disconnect()

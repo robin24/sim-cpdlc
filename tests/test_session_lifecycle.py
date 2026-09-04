@@ -54,17 +54,28 @@ def dialogue(session):
 
 
 def test_disconnect_logs_off_and_forgets_the_dialogue(logger):
+    """The LOGOFF is queued ahead of the disconnect, so the connection is only
+    closed once it has gone out; the menu item comes back with the result."""
     window, session, connection, manager = build(logger)
 
     window.on_disconnect()
+
+    assert dialogue(session) == ("", None, "", 1)
+    assert window.status_texts[-1] == "Disconnecting..."
+    assert window.menu_item_connect.enabled is False
+    assert connection.disconnected is False
+
     window.worker.run_pending()
 
     assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
-    assert dialogue(session) == ("", None, "", 1)
     assert connection.disconnected is True
-    assert (CLIENT_CALLSIGN, "LOGOFF") in rows(manager)
-    assert ("SYSTEM", "Disconnected from CPDLC network") in rows(manager)
-    assert window.status_texts == ["Disconnected from CPDLC network."]
+    assert rows(manager) == [
+        (CLIENT_CALLSIGN, "LOGOFF"),
+        ("SYSTEM", "Disconnected from CPDLC network"),
+    ]
+    assert window.status_texts[-1] == "Disconnected from CPDLC network."
+    assert (window.menu_item_connect.enabled, window.menu_item_connect.label) == (True, "&Connect")
+    assert window.worker.generation == 1
 
 
 def test_disconnect_forgets_the_dialogue_even_when_the_logoff_fails(logger):
@@ -77,8 +88,23 @@ def test_disconnect_forgets_the_dialogue_even_when_the_logoff_fails(logger):
     window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
-    assert ("SYSTEM", "Could not send LOGOFF to EDYY: timed out") in rows(manager)
+    assert rows(manager) == [
+        ("SYSTEM", "Could not send LOGOFF to EDYY: timed out"),
+        ("SYSTEM", "Disconnected from CPDLC network"),
+    ]
     assert connection.disconnected is True
+
+
+def test_disconnect_forgets_the_responses_that_were_in_flight(logger):
+    """Their results were dropped with the generation, so nothing would ever
+    release them; the next session must not find the uplink blocked."""
+    window, session, connection, manager = build(logger)
+    window._responses_in_flight[7] = "WILCO"
+
+    window.on_disconnect()
+    window.worker.run_pending()
+
+    assert window._responses_in_flight == {}
 
 
 def test_disconnect_closes_a_handover_in_progress(logger):
@@ -150,10 +176,13 @@ def test_a_vetoed_exit_keeps_the_logon(logger, message_boxes):
 def test_a_rejected_logon_code_forgets_the_dialogue(logger):
     window, session, _, _ = build(logger)
     session.handle_handover(STATION, "EDGG")
+    window._responses_in_flight[7] = "WILCO"
 
     window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
 
     assert dialogue(session) == ("", None, "", 1)
+    assert window.worker.generation == 1
+    assert window._responses_in_flight == {}
 
 
 # --- an outage is not a disconnect --------------------------------------------
@@ -189,19 +218,42 @@ class FakeConnectDialog:
 
 
 def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
-    """A different callsign or network starts a clean dialogue; the session
-    decides, the window only passes both on."""
+    """The connect runs on the worker; the menu item is disabled until it
+    reports. A different callsign or network starts a clean dialogue; the
+    session decides, the window only passes both on."""
     monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
     window, session, connection, manager = build(logger)
 
     window.on_connect()
 
+    assert window.status_texts[-1] == "Connecting as BAW123..."
+    assert window.menu_item_connect.enabled is False
+    assert connection.connected_as is None
+
+    window.worker.run_pending()
+
     assert connection.connected_as == ("BAW123", "sayintentions")
     assert (session.get_callsign(), session.network) == ("BAW123", "sayintentions")
     assert session.is_logged_on() is False
     assert window.polling_controller.started is True
-    assert window.status_texts == ["Connected as BAW123."]
+    assert window.menu_item_connect.enabled is True
+    assert window.status_texts[-1] == "Connected as BAW123."
     assert rows(manager) == [("SYSTEM", "Connected as BAW123")]
+
+
+def test_a_failed_connection_is_reported_and_the_menu_item_comes_back(logger, monkeypatch, message_boxes):
+    monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
+    connection = FakeConnectionManager(connect_error=HoppieError("invalid logon code"))
+    window, session, connection, _ = build(logger, connection)
+
+    window.on_connect()
+    window.worker.run_pending()
+
+    assert message_boxes.captions == ["Error"]
+    assert "invalid logon code" in message_boxes.calls[0][0]
+    assert window.menu_item_connect.enabled is True
+    assert window.status_texts[-1] == "Not connected."
+    assert window.polling_controller.started is False
 
 
 # --- Requests > Logon ----------------------------------------------------------
