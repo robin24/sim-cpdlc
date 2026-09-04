@@ -17,7 +17,7 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 - **TELEX Messaging**: Send free-text messages to any station
 - **SimBrief Integration**: Automatically fetch flight details from your SimBrief flight plans
 - **Message History**: View and respond to all received messages
-- **Automatic Reconnection**: Handles connection issues gracefully
+- **Resilient link**: rides out network outages, announces a lost and a restored link, and keeps polling
 
 ## Installation
 
@@ -27,7 +27,7 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 ### Install from Source
 #### Prerequisites
 
-- Python 3.7 or higher
+- Python 3.12 or higher
 
 1. Clone this repository:
    ```bash
@@ -66,7 +66,7 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 ### Logging On to a Station
 
 1. After connecting, go to `Requests > Logon`
-2. Enter the ICAO code of the ATC station (e.g., `KUSA` for en route CPDLC within the US)
+2. Enter the four-letter code of the ATC station (e.g., `KUSA` for en route CPDLC within the US)
 3. Click OK to send the logon request
 
 ### Requesting Pre-Departure Clearance (PDC)
@@ -84,18 +84,20 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 ### Requesting Altitude Changes
 
 1. Go to `Requests > Altitude change`
-2. Select:
-   - Desired altitude
-   - Climb or descent
-   - (Optional) Reason for the request
-3. Click OK to send the request
+2. Enter the flight level as two or three digits without `FL` (`350` for FL350, `90` for FL090)
+3. Optionally give a reason: weather or aircraft performance
+4. Click OK to send the request
+
+`Requests > Direct to`, `Requests > Speed change` and `Requests > When can we
+expect` work the same way. Each dialog says what it accepts and only enables OK
+for a value the network will take.
 
 ### Sending TELEX Messages
 
 1. Go to `Requests > Telex message`
 2. Enter:
-   - Recipient (ICAO code or callsign)
-   - Message text
+   - Recipient: a station name or callsign of 3 to 8 letters or digits (your current station is filled in)
+   - Message text: up to 220 plain-ASCII characters; the dialog counts them as you type
 3. Click OK to send the message
 
 ### Requesting Weather
@@ -106,8 +108,9 @@ The main window of Sim-CPDLC is very simple, and contains the following:
 4. Optionally check `Keep this report updated automatically`
 5. Click OK
 
-The report is added to the message list and the notification sound plays, just
-as it does for a message from a controller.
+The report is added to the message list without the notification sound: you
+asked for it, so there is nothing to announce. Automatic updates (below) do
+play it, because they arrive unprompted.
 
 ### Automatic Weather Updates
 
@@ -145,6 +148,25 @@ To stop watching one, use whichever is closest to hand:
 
 1. Click `File > Disconnect` when you're finished
 2. If you're logged on to a station, the application will automatically send a logoff message
+
+### Network Behaviour
+
+All network traffic runs on one background thread, so the window never freezes
+while a message is on its way. Messages go out one at a time, five seconds
+apart, which is what the networks ask for; the status bar reads `Sending ...`
+while a message is queued and `Sent ...` once it has gone. On exit the client
+waits up to five seconds for anything still queued, such as the logoff message.
+
+A poll that fails is retried. After three failures in a row the link counts as
+lost: the status bar and a `SYSTEM` message say so and the notification sound
+plays. Polling continues at growing intervals (20 seconds, then 1, 2 and 5
+minutes) until a poll succeeds, and `Connection restored` is announced the same
+way. Polling only stops on its own when the server rejects your logon code,
+which no retry can fix.
+
+A checkout run with `python app.py` shows its version as `X.Y.Z (source)` in
+`File > About` and never checks for updates automatically; packaged builds do,
+unless you switch it off in `File > Settings`.
 
 ## Running the Tests
 

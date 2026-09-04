@@ -113,9 +113,9 @@ def format_report_text(text):
 
     Hoppie separates the lines of an information report with "@", which a
     screen reader announces as the word "at" if it is left in place. This is
-    deliberately not message_formatting.format_message_text: that helper maps
-    "@@" to the literal string "N/A" and strips underscores, which are CPDLC
-    packet conventions and would corrupt a weather report.
+    deliberately not message_formatting.format_message_text: that helper
+    treats "@" as the field separator of a CPDLC element and strips
+    underscores, conventions that would corrupt a weather report.
 
     Args:
         text: The raw report text.

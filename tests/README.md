@@ -24,8 +24,8 @@ Shared test doubles (`uplink`, `FakeConnectionManager`, `FakeSimConnectManager`,
 `from tests.support import ...`. Network work runs on a worker thread in the
 application; tests use `inline_worker()`, which has no thread, and call
 `run_pending()` to run what a handler queued. The few tests that build the real
-window start its worker thread and shut it down at teardown, and one worker test
-starts a thread on purpose.
+window start its worker thread and shut it down at teardown, and two worker tests
+start a thread on purpose.
 
 | File | Covers |
 | --- | --- |
