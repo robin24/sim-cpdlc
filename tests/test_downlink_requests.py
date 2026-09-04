@@ -8,7 +8,7 @@ the network.
 import pytest
 from hoppie_connector import HoppieError
 
-from tests.support import FakeConnectionManager
+from tests.support import FakeConnectionManager, inline_worker
 from src.model.cpdlc_elements import REASON_AIRCRAFT_PERFORMANCE, REASON_WEATHER
 from src.model.cpdlc_session import CpdlcSession
 
@@ -18,7 +18,9 @@ STATION = "EGGX"
 @pytest.fixture
 def make_session(logger):
     def build(connected=True, station=STATION):
-        session = CpdlcSession(logger, FakeConnectionManager(connected=connected))
+        session = CpdlcSession(
+            logger, FakeConnectionManager(connected=connected), worker=inline_worker(logger)
+        )
         session.begin_session("BAW123", "hoppie")
         session.current_station = station
         return session
@@ -57,14 +59,36 @@ def test_a_request_without_a_connection_is_refused(make_session):
 # --- weather ------------------------------------------------------------------
 
 
-def test_a_weather_request_returns_the_report(session):
-    assert session.request_weather("metar", "EGLL") == (True, "EGLL REPORT FOR metar")
+def test_a_weather_request_delivers_the_report_when_it_arrives(session):
+    outcomes = []
+
+    assert session.request_weather("metar", "EGLL", lambda ok, text: outcomes.append((ok, text))) is True
+    assert outcomes == []
+
+    session.worker.run_pending()
+
+    assert outcomes == [(True, "EGLL REPORT FOR metar")]
+    assert session.connection_manager.info_requests == [("metar", "EGLL")]
 
 
 def test_a_weather_request_without_a_connection_is_refused(make_session):
     session = make_session(connected=False)
 
-    assert session.request_weather("metar", "EGLL") == (False, None)
+    assert session.request_weather("metar", "EGLL", lambda ok, text: None) is False
+
+
+def test_a_failed_weather_request_reports_the_error(logger):
+    session = CpdlcSession(
+        logger,
+        FakeConnectionManager(raise_with=HoppieError("no data")),
+        worker=inline_worker(logger),
+    )
+    outcomes = []
+    session.request_weather("metar", "EGLL", lambda ok, text: outcomes.append((ok, text)))
+
+    session.worker.run_pending()
+
+    assert outcomes == [(False, "no data")]
 
 
 # --- reason wording -----------------------------------------------------------

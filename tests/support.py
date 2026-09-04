@@ -181,13 +181,14 @@ class FakeSimConnectManager:
 
 
 class FakeWeatherMonitor:
-    """Records the lifecycle calls the window makes on the weather monitor."""
+    """Records the lifecycle calls and subscriptions the window makes on the weather monitor."""
 
     def __init__(self):
         self.stopped = False
         self.cleared = False
         self.started = False
         self.shut_down = False
+        self.subscriptions = {}
 
     def start(self, parent_window):
         self.started = True
@@ -197,9 +198,22 @@ class FakeWeatherMonitor:
 
     def clear(self):
         self.cleared = True
+        self.subscriptions.clear()
 
     def shutdown(self):
         self.shut_down = True
+
+    def subscribe(self, icao, info_type, initial_text=None):
+        self.subscriptions[(icao.upper(), info_type)] = initial_text
+
+    def unsubscribe(self, icao, info_type):
+        return self.subscriptions.pop((icao.upper(), info_type), None) is not None
+
+    def is_subscribed(self, icao, info_type):
+        return (icao.upper(), info_type) in self.subscriptions
+
+    def count(self):
+        return len(self.subscriptions)
 
 
 class FakeMenuItem:
@@ -345,6 +359,7 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.message_manager = message_manager
     window.message_view = RecordingMessageView()
     window.connection_manager = cpdlc_session.connection_manager
+    window.worker = cpdlc_session.worker
     window.polling_controller = FakePollingController()
     window.weather_monitor = FakeWeatherMonitor()
     window.menu_item_connect = FakeMenuItem()

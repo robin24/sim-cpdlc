@@ -7,8 +7,10 @@ which is what the worker thread posts back through wx.CallAfter.
 """
 
 import pytest
+from hoppie_connector import HoppieError
 
 from src.model.weather_monitor import WeatherMonitor
+from tests.support import inline_worker
 
 
 class ScriptedConnection:
@@ -52,6 +54,7 @@ def atis(logger, frame):
         on_update=lambda subscription, text, description: announced.append(
             description
         ),
+        worker=inline_worker(logger),
     )
     monitor._parent = frame
     monitor.subscribe("EGLL", "vatatis")
@@ -67,6 +70,7 @@ def metar(logger, frame):
         on_update=lambda subscription, text, description: announced.append(
             description
         ),
+        worker=inline_worker(logger),
     )
     monitor._parent = frame
     monitor.subscribe("EGLL", "metar", initial_text="EGLL 261150Z 24010KT Q1013")
@@ -133,6 +137,7 @@ def test_repeated_failures_drop_the_subscription(logger, frame):
         logger,
         ScriptedConnection(),
         on_error=lambda subscription, error: errors.append(error),
+        worker=inline_worker(logger),
     )
     monitor._parent = frame
     monitor.subscribe("ZZZZ", "metar")
@@ -163,7 +168,9 @@ def test_unsubscribing_twice_is_a_no_op(atis):
 
 def test_the_monitor_can_be_stopped_and_started_again(logger, frame):
     """Disconnecting stops the timer, so reconnecting has to bring it back."""
-    monitor = WeatherMonitor(logger, ScriptedConnection(), interval_ms=60000)
+    monitor = WeatherMonitor(
+        logger, ScriptedConnection(), interval_ms=60000, worker=inline_worker(logger)
+    )
 
     monitor.start(frame)
     assert monitor._timer.IsRunning()
@@ -179,14 +186,20 @@ def test_the_monitor_can_be_stopped_and_started_again(logger, frame):
     assert monitor._timer is None
 
 
-# --- reporting whether a cycle actually started -------------------------------
+# --- the update cycle runs on the worker --------------------------------------
+
+
+def build(logger, frame, connection, **callbacks):
+    worker = inline_worker(logger)
+    monitor = WeatherMonitor(logger, connection, worker=worker, **callbacks)
+    monitor.start(frame)
+    return monitor, worker
 
 
 def test_check_now_says_a_cycle_started(logger, frame):
     """The dialog tells the user reports are being checked, so it needs to know
     whether that is true."""
-    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
-    monitor.start(frame)
+    monitor, _ = build(logger, frame, ScriptedConnection(["EGLL 1150Z"]))
     monitor.subscribe("EGLL", "metar")
 
     assert monitor.check_now() is True
@@ -195,8 +208,7 @@ def test_check_now_says_a_cycle_started(logger, frame):
 def test_check_now_says_nothing_started_while_stopped(logger, frame):
     """Disconnecting stops the monitor but leaves the dialog reachable. Saying
     a check is under way when none is would be worse than saying nothing."""
-    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
-    monitor.start(frame)
+    monitor, _ = build(logger, frame, ScriptedConnection(["EGLL 1150Z"]))
     monitor.subscribe("EGLL", "metar")
     monitor.stop()
 
@@ -204,7 +216,54 @@ def test_check_now_says_nothing_started_while_stopped(logger, frame):
 
 
 def test_check_now_says_nothing_started_with_no_subscriptions(logger, frame):
-    monitor = WeatherMonitor(logger, ScriptedConnection(["EGLL 1150Z"]))
-    monitor.start(frame)
+    monitor, _ = build(logger, frame, ScriptedConnection(["EGLL 1150Z"]))
 
     assert monitor.check_now() is False
+
+
+def test_a_cycle_asks_for_every_subscription_through_the_worker(logger, frame):
+    """One inforeq job per subscription; the worker spaces them out. A second
+    cycle waits until the first has reported in full."""
+    connection = ScriptedConnection(["EGLL 1150Z"])
+    monitor, worker = build(logger, frame, connection)
+    monitor.subscribe("EGLL", "metar")
+    monitor.subscribe("EDDF", "metar")
+
+    assert monitor.check_now() is True
+    assert worker.pending() == 2
+    assert monitor.check_now() is False
+
+    worker.run_pending()
+
+    assert connection.calls == 2
+    assert monitor.check_now() is True
+
+
+def test_results_of_a_stopped_cycle_are_ignored(logger, frame):
+    """Disconnecting stops the monitor while a cycle is out; its answers must
+    neither announce anything nor count against a subscription."""
+    errors = []
+    monitor, worker = build(
+        logger,
+        frame,
+        ScriptedConnection([HoppieError("no data")]),
+        on_error=lambda subscription, error: errors.append(error),
+    )
+    monitor.subscribe("EGLL", "metar")
+    monitor.check_now()
+    monitor.stop()
+
+    worker.run_pending()
+
+    assert monitor.get_subscriptions()[0].error_count == 0
+    assert errors == []
+
+
+def test_a_failed_fetch_counts_against_the_subscription(logger, frame):
+    monitor, worker = build(logger, frame, ScriptedConnection([HoppieError("no data")]))
+    monitor.subscribe("EGLL", "metar")
+    monitor.check_now()
+
+    worker.run_pending()
+
+    assert monitor.get_subscriptions()[0].error_count == 1

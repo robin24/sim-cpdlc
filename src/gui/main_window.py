@@ -139,6 +139,7 @@ class MainWindow(wx.Frame):
             self._on_weather_update,
             self._on_weather_error,
             interval_ms=interval_minutes * 60000,
+            worker=self.worker,
         )
 
         # Bind the close event to handle ALT+F4 and other direct close operations
@@ -772,27 +773,55 @@ class MainWindow(wx.Frame):
                     f"Stopped automatic updates for {label} {icao}", "SYSTEM"
                 )
 
-            success, result = self.cpdlc_session.request_weather(info_type, icao)
-
-            if success:
-                self._add_weather_message(result, icao, info_type)
-
-                # Only start watching a report we know we can actually fetch.
-                if auto_update:
-                    self.weather_monitor.subscribe(icao, info_type, initial_text=result)
-                    if not was_watched:
-                        self._add_custom_message(
-                            f"Now watching {label} {icao} for changes", "SYSTEM"
-                        )
-            else:
-                error_detail = f": {result}" if result else ""
+            self.SetStatusText(f"Requesting {label} for {icao}...")
+            queued = self.cpdlc_session.request_weather(
+                info_type,
+                icao,
+                lambda success, result: self._on_weather_requested(
+                    success, result, icao, info_type, auto_update, was_watched
+                ),
+            )
+            if not queued:
                 wx.MessageBox(
-                    f"Failed to retrieve {label} for {icao}{error_detail}.",
+                    f"Failed to retrieve {label} for {icao}: not connected.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
 
         dlg.Destroy()
+
+    def _on_weather_requested(self, success, result, icao, info_type, auto_update, was_watched):
+        """Show a requested report, or say why it did not come. Runs on the GUI thread.
+
+        Args:
+            success: Whether the report arrived
+            result: The report text, or the error text
+            icao: Airport ICAO code
+            info_type: Report type key
+            auto_update: Whether the pilot asked to keep the report updated
+            was_watched: Whether it was already being watched when asked
+        """
+        label = report_type_label(info_type)
+        if not success:
+            error_detail = f": {result}" if result else ""
+            self.SetStatusText(f"Could not retrieve {label} for {icao}.")
+            wx.MessageBox(
+                f"Failed to retrieve {label} for {icao}{error_detail}.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        self._add_weather_message(result, icao, info_type)
+        self.SetStatusText(f"{label} for {icao} received.")
+
+        # Only start watching a report we know we can actually fetch.
+        if auto_update:
+            self.weather_monitor.subscribe(icao, info_type, initial_text=result)
+            if not was_watched:
+                self._add_custom_message(
+                    f"Now watching {label} {icao} for changes", "SYSTEM"
+                )
 
     def on_weather_subscriptions(self, _):
         """Show and manage the reports being kept up to date."""

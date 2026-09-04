@@ -2,27 +2,22 @@
 
 Neither Hoppie nor SayIntentions push weather to the aircraft, so an automatic
 update is really a polite re-request on a timer. This module keeps the list of
-subscribed airports, re-fetches each report in a worker thread so the GUI never
-blocks on network I/O, and only announces a report when it has actually changed
-(a new ATIS letter, or amended METAR/TAF text).
+subscribed airports, re-fetches each report through the network worker so the
+GUI never blocks on network I/O, and only announces a report when it has
+actually changed (a new ATIS letter, or amended METAR/TAF text).
 """
 
-import threading
+import functools
 import time
 
 import wx
 
-from hoppie_connector import HoppieError
-
+from src.model.network_worker import PRIORITY_INFO
 from src.utils.weather_parsing import (
     describe_report,
     report_signature,
     report_type_label,
 )
-
-# Pause between consecutive fetches in one cycle, so a handful of
-# subscriptions doesn't arrive at the server as a burst.
-_REQUEST_SPACING_SECONDS = 1.0
 
 # Consecutive failures tolerated before a subscription is dropped, so a
 # mistyped ICAO or an airport with no ATIS doesn't retry forever.
@@ -60,9 +55,10 @@ class WeatherMonitor:
     """Keeps subscribed weather reports up to date and reports the changes.
 
     All subscription state is owned by the GUI thread. The timer builds a
-    snapshot, hands it to a short-lived worker thread that performs the
-    blocking HTTP requests, and results come back via wx.CallAfter — so
-    nothing here mutates shared state from two threads at once.
+    snapshot and submits one information request per subscription to the
+    network worker; each result comes back on the GUI thread tagged with the
+    cycle it belongs to, so a cycle cancelled by stop() is ignored when it
+    reports, and nothing here is touched from two threads at once.
     """
 
     def __init__(
@@ -72,6 +68,7 @@ class WeatherMonitor:
         on_update=None,
         on_error=None,
         interval_ms=300000,
+        worker=None,
     ):
         """Initialize the weather monitor.
 
@@ -81,18 +78,23 @@ class WeatherMonitor:
             on_update: Callback(subscription, text, description) for new reports
             on_error: Callback(subscription, error_text) for repeated failures
             interval_ms: How often to re-check each subscription
+            worker: The NetworkWorker that performs the requests
         """
         self.logger = logger
         self.connection_manager = connection_manager
         self.on_update = on_update
         self.on_error = on_error
         self.interval_ms = interval_ms
+        self.worker = worker
 
         self._subscriptions = {}
         self._timer = None
         self._parent = None
-        self._cycle_running = False
         self._shutting_down = False
+        # Each cycle gets a number; a result tagged with an older one is
+        # ignored. _cycle_pending counts the current cycle's outstanding jobs.
+        self._cycle_id = 0
+        self._cycle_pending = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -118,8 +120,14 @@ class WeatherMonitor:
             )
 
     def stop(self):
-        """Stop the update timer, leaving subscriptions in place."""
+        """Stop the update timer, leaving subscriptions in place.
+
+        A cycle still out is abandoned: its results arrive tagged with the
+        old cycle id and are ignored.
+        """
         self._shutting_down = True
+        self._cycle_id += 1
+        self._cycle_pending = 0
         if self._timer and self._timer.IsRunning():
             self._timer.Stop()
             self.logger.info("Stopped weather monitor")
@@ -242,7 +250,7 @@ class WeatherMonitor:
         self._run_cycle()
 
     def _run_cycle(self):
-        """Kick off a fetch for every subscription, on a worker thread.
+        """Submit a fetch for every subscription to the worker.
 
         Returns:
             bool: True if a cycle started, False if it was skipped.
@@ -250,7 +258,7 @@ class WeatherMonitor:
         if self._shutting_down or not self._subscriptions or self._parent is None:
             return False
 
-        if self._cycle_running:
+        if self._cycle_pending:
             self.logger.debug("Weather update cycle still running, skipping this tick")
             return False
 
@@ -261,60 +269,37 @@ class WeatherMonitor:
         # Snapshot on the GUI thread so the worker never touches the live dict.
         pending = [(s.icao, s.info_type) for s in self._subscriptions.values()]
 
-        self._cycle_running = True
-        thread = threading.Thread(
-            target=self._fetch_worker, args=(pending,), daemon=True
-        )
-        thread.start()
+        self._cycle_id += 1
+        cycle = self._cycle_id
+        self._cycle_pending = len(pending)
+        for icao, info_type in pending:
+            self.worker.submit(
+                "inforeq",
+                functools.partial(self.connection_manager.send_info_request, info_type, icao),
+                functools.partial(self._on_job_done, cycle, icao, info_type),
+                PRIORITY_INFO,
+            )
         return True
 
-    def _fetch_worker(self, pending):
-        """Fetch each subscribed report. Runs on a worker thread.
+    def _on_job_done(self, cycle, icao, info_type, result):
+        """Apply one fetch result to the cycle it belongs to. Runs on the GUI thread.
 
         Args:
-            pending: List of (icao, info_type) tuples to fetch
+            cycle: The cycle id the job was submitted under
+            icao: Airport ICAO code
+            info_type: Report type key
+            result: The worker's JobResult
         """
-        try:
-            for index, (icao, info_type) in enumerate(pending):
-                if self._shutting_down:
-                    break
-
-                if index:
-                    time.sleep(_REQUEST_SPACING_SECONDS)
-
-                try:
-                    text = self.connection_manager.send_info_request(info_type, icao)
-                    error = None
-                except HoppieError as exc:
-                    text = None
-                    error = str(exc)
-                except Exception as exc:  # pragma: no cover - defensive
-                    text = None
-                    error = str(exc)
-                    self.logger.error(
-                        f"Unexpected error fetching {info_type} for {icao}: {exc}"
-                    )
-
-                self._post_result(icao, info_type, text, error)
-        finally:
-            self._post_cycle_finished()
-
-    def _post_result(self, icao, info_type, text, error):
-        """Hand one fetch result back to the GUI thread."""
-        if self._shutting_down or not self._parent or self._parent.IsBeingDeleted():
+        if cycle != self._cycle_id:
+            # stop() ran while the request was out; the pilot may be
+            # disconnected or connected as someone else by now.
             return
-        wx.CallAfter(self._on_result, icao, info_type, text, error)
 
-    def _post_cycle_finished(self):
-        """Clear the in-progress flag on the GUI thread."""
-        if not self._parent or self._parent.IsBeingDeleted():
-            self._cycle_running = False
-            return
-        wx.CallAfter(self._on_cycle_finished)
-
-    def _on_cycle_finished(self):
-        """Mark the update cycle as complete. Runs on the GUI thread."""
-        self._cycle_running = False
+        self._cycle_pending -= 1
+        if result.ok:
+            self._on_result(icao, info_type, result.value, None)
+        else:
+            self._on_result(icao, info_type, None, result.error)
 
     def _on_result(self, icao, info_type, text, error):
         """Apply one fetch result. Runs on the GUI thread.

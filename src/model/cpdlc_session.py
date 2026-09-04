@@ -8,6 +8,7 @@ from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from src.config import PENDING_LOGON_TIMEOUT_SECONDS, PREVIOUS_STATION_WINDOW_SECONDS
 from src.model.connection_manager import ConnectionManager
+from src.model.network_worker import PRIORITY_INFO
 from src.utils.weather_parsing import report_type_label
 
 
@@ -27,6 +28,7 @@ class CpdlcSession:
         logger,
         connection_manager: ConnectionManager,
         clock: Callable[[], float] = time.monotonic,
+        worker=None,
     ):
         """Initialize the CPDLC session.
 
@@ -36,10 +38,12 @@ class CpdlcSession:
             clock: Returns the current time in seconds. Monotonic, so the
                 session's time windows are not upset by a clock change; tests
                 pass a hand-driven clock.
+            worker: The NetworkWorker that performs the requests and sends
         """
         self.logger = logger
         self.connection_manager = connection_manager
         self.clock = clock
+        self.worker = worker
         self.callsign = ""
         self.network = None
         self.current_station = ""
@@ -299,29 +303,6 @@ class CpdlcSession:
 
         self.cpdlc_min_counter += 1
         return True, response
-
-    def _request_info(self, icao: str, label: str, send) -> Tuple[bool, Optional[str]]:
-        """Run an information request and normalise the result.
-
-        Args:
-            icao: Airport ICAO code
-            label: Human-readable request name for log messages
-            send: Callable taking the ICAO code and returning the response text
-
-        Returns:
-            tuple: (success, text_or_error)
-        """
-        if not self.connection_manager.is_connected():
-            self.logger.warning(
-                f"{label} request attempted without active connection"
-            )
-            return False, None
-
-        try:
-            return True, send(icao)
-        except HoppieError as exc:
-            self.logger.error(f"Failed to request {label} for {icao}: {exc}")
-            return False, str(exc)
 
     def send_direct_request(
         self, fix: str, reason: Optional[str] = None
@@ -651,18 +632,33 @@ class CpdlcSession:
 
         return True, message
 
-    def request_weather(self, info_type: str, icao: str) -> Tuple[bool, Optional[str]]:
+    def request_weather(self, info_type, icao, on_done=None):
         """Request a weather/information report for an airport.
 
         Args:
             info_type: Report type key ("metar", "taf", "shorttaf", "vatatis")
             icao: Airport ICAO code
+            on_done: Callable(success, report_text_or_error), run on the GUI
+                thread when the report arrives
 
         Returns:
-            tuple: (success, report_text_or_error)
+            bool: True if the request was queued, False if not connected
         """
-        return self._request_info(
-            icao,
-            report_type_label(info_type),
-            lambda code: self.connection_manager.send_info_request(info_type, code),
+        label = report_type_label(info_type)
+        if not self.connection_manager.is_connected():
+            self.logger.warning(f"{label} request attempted without active connection")
+            return False
+
+        def finished(result):
+            if not result.ok:
+                self.logger.error(f"Failed to request {label} for {icao}: {result.error}")
+            if on_done is not None:
+                on_done(result.ok, result.value if result.ok else result.error)
+
+        self.worker.submit(
+            "inforeq",
+            lambda: self.connection_manager.send_info_request(info_type, icao),
+            finished,
+            PRIORITY_INFO,
         )
+        return True
