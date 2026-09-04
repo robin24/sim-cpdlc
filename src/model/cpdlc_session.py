@@ -1,6 +1,5 @@
 """CPDLC session management for the client."""
 
-import logging
 import time
 from typing import Optional, Callable
 

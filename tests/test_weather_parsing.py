@@ -52,18 +52,18 @@ def test_the_plain_atis_is_labelled_without_a_network():
 
 
 def test_the_letter_is_read_from_the_information_marker():
-    assert extract_atis_letter("EGLL ATIS INFORMATION K RWY 27R", "EGLL") == "K"
+    assert extract_atis_letter("EGLL ATIS INFORMATION K RWY 27R") == "K"
 
 
 def test_a_spelled_out_letter_is_understood():
-    assert extract_atis_letter("EGLL ATIS INFO KILO RWY 27R", "EGLL") == "K"
+    assert extract_atis_letter("EGLL ATIS INFO KILO RWY 27R") == "K"
 
 
 def test_a_datis_designator_is_not_mistaken_for_the_letter():
     """A US D-ATIS names itself "KSFO D ATIS" before giving the letter. Reading
     the D as the letter pins the signature to a value that never changes, so
     the report would silently stop announcing for the rest of the flight."""
-    assert extract_atis_letter("KSFO D ATIS INFO Q 1156Z 28010KT", "KSFO") == "Q"
+    assert extract_atis_letter("KSFO D ATIS INFO Q 1156Z 28010KT") == "Q"
 
 
 def test_a_datis_that_advances_reads_as_a_change():
@@ -75,7 +75,7 @@ def test_a_datis_that_advances_reads_as_a_change():
 
 def test_an_unreadable_letter_falls_back_to_the_whole_report():
     """Better to compare the full text than to guess at a letter."""
-    assert extract_atis_letter("FRANKFURT ARRIVAL RWY 25L", "EDDF") == ""
+    assert extract_atis_letter("FRANKFURT ARRIVAL RWY 25L") == ""
 
 
 # --- report formatting ---------------------------------------------------------

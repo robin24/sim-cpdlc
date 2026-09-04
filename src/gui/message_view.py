@@ -97,12 +97,6 @@ class MessageView:
         self.message_list.SetItemData(index, message_id)
         self._fit_columns()
 
-    def clear(self):
-        """Clear all messages from the view."""
-        self.message_list.DeleteAllItems()
-        self.message_detail.Clear()
-        self._fit_columns()
-
     def _fit_columns(self):
         """Size the Sender column to its content and give the Message column the rest.
 

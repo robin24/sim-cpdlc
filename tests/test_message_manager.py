@@ -179,14 +179,3 @@ def test_the_responses_offered_for_each_requirement_code(logger, rr, expected):
     message_id = manager.add_message(uplink(STATION, 9, "CONFIRM SQUAWK", rr=rr))
 
     assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (bool(expected), expected)
-
-
-def test_is_acknowledged_reports_only_terminal_responses(logger):
-    manager = MessageManager(logger)
-    message_id = manager.add_message(uplink(STATION, 7))
-
-    assert manager.is_acknowledged(message_id) is False
-    manager.mark_acknowledged(message_id, "STANDBY")
-    assert manager.is_acknowledged(message_id) is False
-    manager.mark_acknowledged(message_id, "WILCO")
-    assert manager.is_acknowledged(message_id) is True

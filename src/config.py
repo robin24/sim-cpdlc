@@ -28,6 +28,12 @@ def get_user_data_dir():
 # there (save_config, the log file), not when this module is imported.
 CONFIG_FILE = os.path.join(appdirs.user_data_dir(APP_NAME, APP_AUTHOR), "config.json")
 
+
+def config_file_exists():
+    """Whether a configuration file has been written yet (False on first launch)."""
+    return os.path.exists(CONFIG_FILE)
+
+
 # Default configuration
 DEFAULT_CONFIG = {
     "sayintentions_logon_code": "",
@@ -106,7 +112,6 @@ HOPPIE_API_URL = "https://www.hoppie.nl/acars/system/connect.html"
 # while a reply is expected. Each idle poll is randomised within this band.
 MIN_POLL_INTERVAL = 45000  # 45 seconds
 MAX_POLL_INTERVAL = 75000  # 75 seconds
-DEFAULT_POLL_INTERVAL = 60000  # 60 seconds, the average of the band above
 ACTIVE_POLL_INTERVAL = 20000  # 20 seconds, the fastest rate Hoppie permits
 INACTIVITY_TIMEOUT = 300000  # 5 minutes
 

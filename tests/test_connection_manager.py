@@ -10,17 +10,15 @@ itself keeps the library's own validators and response parsers in the path, so
 these tests fail if hoppie_connector changes what it raises.
 """
 
-import logging
 import traceback
 
 import pytest
 import requests
-from hoppie_connector import CpdlcResponseRequirement as RR, HoppieConnector, HoppieError
+from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
 from src.config import HOPPIE_API_URL, SAYINTENTIONS_API_URL
 from src.model.connection_manager import (
     ConnectionManager,
-    PollResult,
     UnreadableMessage,
     install_request_timeout,
     redact,

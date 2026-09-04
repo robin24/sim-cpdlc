@@ -138,7 +138,7 @@ def format_report_line(text):
     return " ".join(" ".join(_report_lines(text)).split())
 
 
-def extract_atis_letter(text, icao=None):
+def extract_atis_letter(text):
     """Pull the information letter out of an ATIS report.
 
     Handles both "INFORMATION K" and "INFORMATION KILO". The airport code is
@@ -150,7 +150,6 @@ def extract_atis_letter(text, icao=None):
 
     Args:
         text: The raw ATIS text.
-        icao: Accepted for call-site compatibility and ignored.
 
     Returns:
         str: A single uppercase letter, or "" if none could be identified.
@@ -196,7 +195,7 @@ def report_signature(text, info_type, icao=None):
         str: An opaque signature string.
     """
     if is_atis_type(info_type):
-        letter = extract_atis_letter(text, icao)
+        letter = extract_atis_letter(text)
         if letter:
             return f"INFO:{letter}"
         # No letter to compare, so fall back to the text -- but drop the time
@@ -223,7 +222,7 @@ def describe_report(text, info_type, icao=None):
     station = f" {icao.upper()}" if icao else ""
 
     if is_atis_type(info_type):
-        letter = extract_atis_letter(text, icao)
+        letter = extract_atis_letter(text)
         if letter:
             return f"{label}{station} information {letter}"
 

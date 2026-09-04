@@ -123,7 +123,7 @@ class MessageManager:
 
         return message_id
 
-    def add_custom_message(self, text: str, sender: str = None) -> int:
+    def add_custom_message(self, text: str, sender: Optional[str] = None) -> int:
         """Add a custom message to the message log.
 
         Args:
@@ -160,18 +160,6 @@ class MessageManager:
 
         self.logger.debug(f"Added {info_type} report for {icao.upper()}")
         return message_id
-
-    def get_weather_key(self, message_id: int) -> Optional[Tuple[str, str]]:
-        """Get the (icao, info_type) pair for a weather report.
-
-        Args:
-            message_id: The message ID
-
-        Returns:
-            tuple: The report key, or None if this is not a weather report
-        """
-        message = self.message_log.get(message_id)
-        return message.key if isinstance(message, WeatherReport) else None
 
     def get_message(self, message_id: int) -> Optional[Any]:
         """Get a message by ID.
@@ -285,18 +273,6 @@ class MessageManager:
 
         self.acknowledged_messages.add(message_id)
         self.logger.debug(f"Marked message as acknowledged: ID={message_id}")
-
-    def is_acknowledged(self, message_id: int) -> bool:
-        """Check whether a message has been answered for good.
-
-        Args:
-            message_id: The message ID
-
-        Returns:
-            bool: True once a terminal response was sent for it; STANDBY does
-                not count, because the message is still waiting for its answer
-        """
-        return message_id in self.acknowledged_messages
 
     def needs_acknowledgement(
         self, message_id: int, is_answerable: Callable[[str], bool]

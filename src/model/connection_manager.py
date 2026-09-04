@@ -156,12 +156,11 @@ class ConnectionManager:
     is down, so info_failures gates nothing.
     """
 
-    def __init__(self, logger, message_callback=None):
+    def __init__(self, logger):
         """Initialize the connection manager.
 
         Args:
             logger: Application logger
-            message_callback: Callback function for received messages
         """
         self.logger = logger
         self.cnx = None
@@ -177,7 +176,6 @@ class ConnectionManager:
         # and gate nothing.
         self.info_failures = 0
         self.max_connection_failures = MAX_CONNECTION_FAILURES
-        self.message_callback = message_callback
 
     def _call(self, operation, is_send=False, is_info=False):
         """Run a hoppie_connector call, normalising its failure modes.

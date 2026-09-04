@@ -295,10 +295,9 @@ def test_a_request_with_a_value_applies_the_rule_for_its_type(dialog, index, typ
 
 
 @pytest.fixture
-def telex(dialog, frame):
-    """A Telex dialog whose parent window claims to be logged on to EDDF."""
-    frame.get_current_station = lambda: "EDDF"
-    return dialog(TelexDialog)
+def telex(dialog):
+    """A Telex dialog opened while logged on to EDDF."""
+    return dialog(TelexDialog, "EDDF")
 
 
 def test_the_dialog_is_wide_enough_for_the_longest_counter_label(telex):

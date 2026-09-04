@@ -15,10 +15,11 @@ from hoppie_connector import CpdlcMessage
 
 from src.config import (
     APP_VERSION,
-    DEFAULT_POLL_INTERVAL,
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
     MESSAGE_SOUND_FILENAME,
+    DEFAULT_CONFIG,
+    config_file_exists,
     weather_interval_minutes,
     load_config,
     save_config,
@@ -147,7 +148,6 @@ class MainWindow(wx.Frame):
             logger,
             self.connection_manager,
             self._on_message_received,
-            DEFAULT_POLL_INTERVAL,
             ACTIVE_POLL_INTERVAL,
             INACTIVITY_TIMEOUT,
             link_callback=self._on_link_change,
@@ -243,7 +243,6 @@ class MainWindow(wx.Frame):
         self.menu_item_logoff = requests_menu.Append(
             wx.ID_ANY, "Log&off\tCTRL+O", "Logoff from the current CPDLC station."
         )
-        # Always enable both logon and logoff menu items
         menu_item_altitude_change = requests_menu.Append(
             wx.ID_ANY, "&Altitude change\tCTRL+T", "Request an altitude change."
         )
@@ -787,18 +786,6 @@ class MainWindow(wx.Frame):
             ):
                 self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
-    def get_current_station(self):
-        """Get the current station from the CPDLC session.
-
-        Returns:
-            str: The current station or empty string if not logged on
-        """
-        return (
-            self.cpdlc_session.get_current_station()
-            if self.cpdlc_session.is_logged_on()
-            else ""
-        )
-
     def on_telex(self, _):
         """Send a telex message to specified recipient."""
         # Check if connected to the network
@@ -806,7 +793,7 @@ class MainWindow(wx.Frame):
             return
 
         self.logger.debug("Opening telex dialog")
-        dlg = TelexDialog(self)
+        dlg = TelexDialog(self, self.cpdlc_session.get_current_station())
         with self._show_dialog(dlg) as answer:
             if answer != wx.ID_OK:
                 return
@@ -1629,39 +1616,34 @@ class MainWindow(wx.Frame):
 
     def _check_first_launch(self):
         """Check if this is the first launch and prompt for settings if needed."""
-        import os
-        from src.config import CONFIG_FILE, load_config, save_config, DEFAULT_CONFIG
+        if config_file_exists():
+            return
 
-        # Check if config file exists
-        config_file_exists = os.path.exists(CONFIG_FILE)
+        self.logger.info("First launch detected - creating config file")
 
-        # If config file doesn't exist, this is the first launch
-        if not config_file_exists:
-            self.logger.info("First launch detected - creating config file")
+        # Create the config file with empty values
+        config = DEFAULT_CONFIG.copy()
+        save_config(config)
 
-            # Create the config file with empty values
-            config = DEFAULT_CONFIG.copy()
-            save_config(config)
+        # Show alert dialog
+        dlg = wx.MessageDialog(
+            self,
+            "Welcome to Sim-CPDLC!\n\n"
+            "It looks like this is your first time running the application. "
+            "Would you like to set up your logon codes and SimBrief user ID now?\n\n"
+            "These settings are required for connecting to CPDLC networks and retrieving SimBrief flight plans.",
+            "Welcome to Sim-CPDLC",
+            wx.YES_NO | wx.ICON_INFORMATION,
+        )
 
-            # Show alert dialog
-            dlg = wx.MessageDialog(
-                self,
-                "Welcome to Sim-CPDLC!\n\n"
-                "It looks like this is your first time running the application. "
-                "Would you like to set up your logon codes and SimBrief user ID now?\n\n"
-                "These settings are required for connecting to CPDLC networks and retrieving SimBrief flight plans.",
-                "Welcome to Sim-CPDLC",
-                wx.YES_NO | wx.ICON_INFORMATION,
-            )
-
-            with self._show_dialog(dlg) as result:
-                if result == wx.ID_YES:
-                    self.logger.debug("User chose to set up settings on first launch")
-                    # Open the settings dialog
-                    wx.CallAfter(self.on_settings, None)
-                else:
-                    self.logger.debug("User chose not to set up settings on first launch")
-                    # Continue with normal UI presentation
+        with self._show_dialog(dlg) as result:
+            if result == wx.ID_YES:
+                self.logger.debug("User chose to set up settings on first launch")
+                # Open the settings dialog
+                wx.CallAfter(self.on_settings, None)
+            else:
+                self.logger.debug("User chose not to set up settings on first launch")
+                # Continue with normal UI presentation
 
     def on_exit(self, _):
         """Handle exit menu selection by closing the window."""

@@ -54,6 +54,7 @@ starts a thread on purpose.
 | `test_request_dialogs.py` | The OK-button rules and the returned values of the logon, altitude, direct-to, speed, when-can-we and telex dialogs, including the telex character count |
 | `test_session_lifecycle.py` | Connect, disconnect and exit through the worker; a rejected logon code; a lost link is not a disconnect |
 | `test_simconnect_manager.py` | The SimConnect tune path: no connecting on its own, the simulator's answer believed |
+| `test_tools.py` | The manual SimBrief probe refuses to run without a user id |
 | `test_update_checker.py` | The update check off the GUI thread, and the prompt that waits for open dialogs |
 | `test_uplink_handling.py` | HANDOVER, LOGOFF, LOGON REJECTED, protocol noise and auto-tune through the window, including the station that handed over |
 | `test_weather_monitor.py` | Weather change detection, the update cycle on the worker, the timer lifecycle, change listeners |
