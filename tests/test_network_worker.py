@@ -13,13 +13,17 @@ import pytest
 
 from hoppie_connector import HoppieError
 
+from src.controller.polling_controller import PollingController
+from src.model.cpdlc_session import CpdlcSession
 from src.model.network_worker import (
     PRIORITY_INFO,
     PRIORITY_LINK,
     PRIORITY_SEND,
     NetworkWorker,
 )
-from tests.support import FakeClock, inline_worker
+from src.model.weather_monitor import WeatherMonitor
+from src.utils.update_checker import UpdateChecker
+from tests.support import FakeClock, FakeConnectionManager, inline_worker
 
 
 def raising(exc):
@@ -308,3 +312,32 @@ def test_shutdown_wakes_a_pacer_that_is_already_asleep(logger):
     assert second_ran.is_set() is True
     assert time.monotonic() - started < 2
     assert worker._thread.is_alive() is False
+
+
+# --- the worker is not optional ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda logger: CpdlcSession(logger, FakeConnectionManager()),
+        lambda logger: PollingController(logger, FakeConnectionManager()),
+        lambda logger: WeatherMonitor(logger, FakeConnectionManager()),
+        lambda logger: UpdateChecker(logger),
+    ],
+    ids=["session", "poller", "weather", "updates"],
+)
+def test_the_network_collaborators_insist_on_a_worker(logger, build):
+    """A default of None used to fail on the first job submitted, far from the
+    constructor that forgot the worker."""
+    with pytest.raises(TypeError):
+        build(logger)
+
+
+def test_a_paced_kind_cannot_be_run_detached(logger):
+    """Detached jobs bypass the spacing; a send or an inforeq run that way
+    would reach the server out of turn."""
+    worker = inline_worker(logger)
+
+    with pytest.raises(ValueError):
+        worker.run_detached("send", lambda: None)

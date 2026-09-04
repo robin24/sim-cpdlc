@@ -29,7 +29,7 @@ class DirectRequestDialog(wx.Dialog):
         self.helper_text = wx.StaticText(
             self, label="2-7 letters or digits, e.g. KONOL or 55N020W"
         )
-        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))
+        self.helper_text.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons

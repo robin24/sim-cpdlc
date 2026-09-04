@@ -14,7 +14,7 @@ from src.model.message_manager import CPDLC_RESPONSES
 
 
 def controller(logger):
-    return PollingController(logger, connection_manager=None)
+    return PollingController(logger, connection_manager=None, worker=inline_worker(logger))
 
 
 def build(logger, connection, message_callback=None, **kwargs):

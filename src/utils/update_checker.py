@@ -6,7 +6,6 @@ never closes the application from under one (audit M-5).
 """
 
 import functools
-import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,14 +36,14 @@ class UpdateOutcome:
 class UpdateChecker:
     """Looks up the latest release on GitHub, off the GUI thread."""
 
-    def __init__(self, logger=None, worker=None):
+    def __init__(self, logger, worker):
         """Initialize the update checker.
 
         Args:
-            logger: Optional logger instance
+            logger: Application logger
             worker: The NetworkWorker that runs the lookup
         """
-        self.logger = logger or logging.getLogger("Sim-CPDLC")
+        self.logger = logger
         self.worker = worker
         self.current_version = APP_VERSION
 

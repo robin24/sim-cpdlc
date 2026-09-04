@@ -48,7 +48,7 @@ start a thread on purpose.
 | `test_message_formatting.py` | Packet prefix stripping and the list and detail text, including doubled separators |
 | `test_message_manager.py` | Message storage, addressing and the full response table |
 | `test_message_view.py` | The message list, its column layout and its response context menu |
-| `test_network_worker.py` | The network worker: ordering, generations, pacing, failure capture, shutdown |
+| `test_network_worker.py` | The network worker: ordering, generations, pacing, failure capture, shutdown; the collaborators that require one |
 | `test_polling_controller.py` | Poll intervals, polls on the worker, the back-off ladder while the link is lost, batch delivery, the tick callback |
 | `test_release.py` | The three version strings agree, the build tools stay out of the runtime requirements, the release workflow tests before it builds |
 | `test_request_dialogs.py` | The OK-button rules and the returned values of the logon, altitude, direct-to, speed, when-can-we and telex dialogs, including the telex character count |

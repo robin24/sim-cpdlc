@@ -376,3 +376,17 @@ def test_the_telex_is_returned_stripped_and_upper_cased(telex):
     telex.message_text.SetValue("  request oceanic clearance \n")
 
     assert telex.get_telex_details() == ("EDDF", "REQUEST OCEANIC CLEARANCE")
+
+
+# --- helper texts ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [AltitudeChangeDialog, DirectRequestDialog, SpeedRequestDialog, WhenCanWeDialog],
+    ids=["altitude", "direct", "speed", "when-can-we"],
+)
+def test_helper_text_uses_the_system_grey_so_high_contrast_themes_apply(dialog, factory):
+    built = dialog(factory)
+
+    assert built.helper_text.GetForegroundColour() == wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)

@@ -56,7 +56,7 @@ class WhenCanWeDialog(wx.Dialog):
         vbox.Add(self.value_text, 0, wx.ALL | wx.EXPAND, 5)
 
         self.helper_text = wx.StaticText(self, label="")
-        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))
+        self.helper_text.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Initially hide value fields (first option doesn't need them)

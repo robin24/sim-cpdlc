@@ -68,7 +68,8 @@ class WeatherMonitor:
         on_update=None,
         on_error=None,
         interval_ms=300000,
-        worker=None,
+        *,
+        worker,
     ):
         """Initialize the weather monitor.
 
@@ -78,7 +79,7 @@ class WeatherMonitor:
             on_update: Callback(subscription, text, description) for new reports
             on_error: Callback(subscription, error_text) for repeated failures
             interval_ms: How often to re-check each subscription
-            worker: The NetworkWorker that performs the requests
+            worker: The NetworkWorker that performs the requests (required)
         """
         self.logger = logger
         self.connection_manager = connection_manager

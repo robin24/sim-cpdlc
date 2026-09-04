@@ -43,7 +43,8 @@ class PollingController:
         link_callback=None,
         unreadable_callback=None,
         tick_callback=None,
-        worker=None,
+        *,
+        worker,
     ):
         """Initialize the polling controller.
 
@@ -63,7 +64,7 @@ class PollingController:
             tick_callback: Callback() run at the end of every tick, whatever
                 the poll returned, for housekeeping that keeps the poll's
                 rhythm, such as giving up on an unanswered logon
-            worker: The NetworkWorker that runs the polls
+            worker: The NetworkWorker that runs the polls (required)
         """
         self.logger = logger
         self.connection_manager = connection_manager
