@@ -427,7 +427,7 @@ class MainWindow(wx.Frame):
 
         # Reach the simulator now, off the GUI thread, so the first CONTACT
         # does not pay for the connection.
-        self._connect_simconnect()
+        self._start_simconnect()
 
     def on_disconnect(self):
         """Disconnect from the CPDLC network."""
@@ -483,6 +483,10 @@ class MainWindow(wx.Frame):
         self.worker.new_generation()
         # Their results were just dropped with the generation.
         self._responses_in_flight.clear()
+        # A simulator reconnect still out reports into the dropped generation,
+        # so its callback never runs; forget it, or auto-tune stays wedged.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
         # Belt and braces: nothing queued during the disconnect may leave a dialogue behind.
         self.cpdlc_session.reset()
 
@@ -937,6 +941,18 @@ class MainWindow(wx.Frame):
         """
         self.worker.run_detached("simconnect", self.simconnect_manager.connect, on_done)
 
+    def _start_simconnect(self):
+        """Connect to the simulator once, off the GUI thread.
+
+        One connect is out at a time: a second request while it runs only
+        waits for it, and _on_simconnect_connected sends any frequency that
+        arrived in the meantime.
+        """
+        if self._simconnect_reconnecting:
+            return
+        self._simconnect_reconnecting = True
+        self._connect_simconnect(self._on_simconnect_connected)
+
     def _send_callback(self, what):
         """Build the on_done for a downlink: echo it and speed up polling, or
         say why it failed.
@@ -1142,6 +1158,10 @@ class MainWindow(wx.Frame):
         self.worker.new_generation()
         # Their results were just dropped with the generation.
         self._responses_in_flight.clear()
+        # A simulator reconnect still out reports into the dropped generation,
+        # so its callback never runs; forget it, or auto-tune stays wedged.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
         self.weather_monitor.stop()
         self.weather_monitor.clear()
         self.connection_manager.disconnect()
@@ -1431,15 +1451,17 @@ class MainWindow(wx.Frame):
         self._pending_tune = freq
         if self._simconnect_reconnecting:
             return
-        self._simconnect_reconnecting = True
         self.simconnect_manager.disconnect()
-        self._connect_simconnect(self._retry_auto_tune)
+        self._start_simconnect()
 
-    def _retry_auto_tune(self, result):
-        """Second and last attempt at a tune, after reconnecting. Runs on the GUI thread.
+    def _on_simconnect_connected(self, result):
+        """Runs after every simulator connect, initial or retry. Runs on the GUI thread.
+
+        Only tunes when a CONTACT is waiting: the initial post-connect
+        handshake usually finds nothing to send.
 
         Args:
-            result: The reconnect's JobResult; its value is connect()'s answer
+            result: The connect's JobResult; its value is connect()'s answer
         """
         self._simconnect_reconnecting = False
         freq, self._pending_tune = self._pending_tune, None

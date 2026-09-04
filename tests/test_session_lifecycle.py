@@ -16,8 +16,10 @@ from tests.support import (
     FakeClock,
     FakeCloseEvent,
     FakeConnectionManager,
+    FakeSimConnectManager,
     inline_worker,
     make_main_window,
+    uplink,
 )
 
 STATION = "EDYY"
@@ -105,6 +107,19 @@ def test_disconnect_forgets_the_responses_that_were_in_flight(logger):
     window.worker.run_pending()
 
     assert window._responses_in_flight == {}
+
+
+def test_disconnect_forgets_a_simulator_reconnect_that_was_out(logger):
+    """Its result reports into the dropped generation and never arrives; the
+    flag must not stay set, or no later CONTACT would ever be tuned."""
+    window, _, _, _ = build(logger)
+    window._simconnect_reconnecting = True
+    window._pending_tune = 133.325
+
+    window.on_disconnect()
+    window.worker.run_pending()
+
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
 
 
 def test_disconnect_closes_a_handover_in_progress(logger):
@@ -223,6 +238,16 @@ def test_a_rejected_logon_code_forgets_the_dialogue(logger):
     assert window._responses_in_flight == {}
 
 
+def test_a_fatal_link_error_forgets_a_simulator_reconnect_that_was_out(logger):
+    window, _, _, _ = build(logger)
+    window._simconnect_reconnecting = True
+    window._pending_tune = 133.325
+
+    window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
+
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
+
+
 # --- an outage is not a disconnect --------------------------------------------
 
 
@@ -279,6 +304,44 @@ def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
     assert window.status_texts[-1] == "Connected as BAW123."
     assert rows(manager) == [("SYSTEM", "Connected as BAW123")]
     assert window.simconnect_manager.connects == 1
+
+
+def test_a_contact_during_the_first_simulator_handshake_waits_for_it(logger, monkeypatch):
+    """The post-connect handshake and a failed tune's reconnect must not run
+    two connects at once; the handshake's result sends the waiting frequency.
+
+    InlineWorker runs a job queued by another job's own callback within the
+    same run_pending() call (the queue is drained by one loop, and queueing
+    happens inside that loop's own iteration), so the real post-connect
+    handshake started by on_connect() has already finished, flag and all, by
+    the time control returns here. To still catch a CONTACT arriving *during*
+    a handshake, the handshake is retriggered directly through
+    _start_simconnect() -- the same entry point _on_connect_result uses --
+    which leaves a job queued but not yet run, and the CONTACT is delivered
+    against that.
+    """
+    monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
+    window, session, connection, _ = build(logger)
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window.simconnect_manager = simconnect
+    window.on_connect()
+    window.worker.run_pending()
+    session.handle_logon_accepted("EDYY")
+    connects_before = simconnect.connects
+
+    window._simconnect_reconnecting = False
+    window._start_simconnect()
+
+    window._on_message_received(uplink("EDYY", 7, "CONTACT MARSEILLE CONTROL ON @133.325@."))
+
+    assert window.worker.pending() == 1
+    assert simconnect.connects == connects_before
+
+    window.worker.run_pending()
+
+    assert simconnect.connects == connects_before + 1
+    assert simconnect.tuned == [133.325, 133.325]
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
 
 
 def test_a_failed_connection_is_reported_and_the_menu_item_comes_back(logger, monkeypatch, message_boxes):
