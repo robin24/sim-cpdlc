@@ -29,6 +29,7 @@ starts a thread on purpose.
 
 | File | Covers |
 | --- | --- |
+| `test_about_dialog.py` | The About box: the "(source)" label and the copyright year |
 | `test_acknowledge_path.py` | Responding to an uplink, end to end from the window, queued on the worker, down to the frame |
 | `test_config.py` | Reading, writing and clamping the configuration |
 | `test_connection_manager.py` | The network boundary: errors, timeouts, poll results, unreadable uplinks, the wire packets |

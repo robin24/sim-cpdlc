@@ -362,8 +362,18 @@ class MainWindow(wx.Frame):
         self.update_checker.check(self._on_manual_update_check)
 
     def on_about(self, _):
-        """Display information about the application."""
-        show_about_dialog(self)
+        """Display information about the application, counted as an open dialog.
+
+        wx.adv.AboutBox is not a wx.Dialog, so it cannot go through
+        _show_dialog; the counter is kept by hand so the update prompt waits
+        for it like for any other dialog.
+        """
+        self._modal_depth += 1
+        try:
+            show_about_dialog(self)
+        finally:
+            self._modal_depth -= 1
+            self._flush_deferred()
 
     def on_connect_or_disconnect(self, _):
         """Toggle connection state based on current status."""

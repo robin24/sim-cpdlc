@@ -434,6 +434,18 @@ def test_every_dialog_is_counted_while_it_is_open(window, monkeypatch):
     assert window._modal_depth == 0
 
 
+def test_the_about_box_is_counted_while_it_is_open(window, monkeypatch):
+    """wx.adv.AboutBox is not a wx.Dialog, so the ShowModal patch above never
+    sees it; the update prompt must still wait for it."""
+    depths = []
+    monkeypatch.setattr(mw, "show_about_dialog", lambda parent: depths.append(window._modal_depth))
+
+    window.on_about(None)
+
+    assert depths == [1]
+    assert window._modal_depth == 0
+
+
 # --- the automatic update check ------------------------------------------------
 
 
