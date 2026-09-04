@@ -4,19 +4,28 @@ When-can-we-expect dialog for the Sim-CPDLC application.
 
 import wx
 
+from src.gui.dialogs.validation import (
+    FLIGHT_LEVEL,
+    KNOTS,
+    MACH,
+    is_flight_level,
+    matches,
+    pad_three,
+)
+
 
 class WhenCanWeDialog(wx.Dialog):
     """Dialog for sending 'WHEN CAN WE EXPECT' inquiries."""
 
-    # Message types and whether they need a value field
+    # Message types and the rule their value must match; None means no value.
     MESSAGE_TYPES = [
-        ("HIGHER LEVEL", False),
-        ("LOWER LEVEL", False),
-        ("BACK ON ROUTE", False),
-        ("CLIMB TO FL", True),
-        ("DESCENT TO FL", True),
-        ("Mach", True),
-        ("Speed (knots)", True),
+        ("HIGHER LEVEL", None),
+        ("LOWER LEVEL", None),
+        ("BACK ON ROUTE", None),
+        ("CLIMB TO FL", FLIGHT_LEVEL),
+        ("DESCENT TO FL", FLIGHT_LEVEL),
+        ("Mach", MACH),
+        ("Speed (knots)", KNOTS),
     ]
 
     def __init__(self, parent):
@@ -77,20 +86,21 @@ class WhenCanWeDialog(wx.Dialog):
     def _on_type_change(self, _):
         """Show/hide value field based on selected type."""
         idx = self._get_selected_index()
-        _, needs_value = self.MESSAGE_TYPES[idx]
+        label, rule = self.MESSAGE_TYPES[idx]
 
-        if needs_value:
+        if rule is not None:
             self.value_label.Show()
             self.value_text.Show()
             self.helper_text.Show()
 
-            label = self.MESSAGE_TYPES[idx][0]
             if "FL" in label:
-                self.helper_text.SetLabel("Enter flight level (e.g. 350)")
+                self.helper_text.SetLabel(
+                    "Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350)"
+                )
             elif label == "Mach":
                 self.helper_text.SetLabel("Enter Mach without decimal (e.g. 082)")
             else:
-                self.helper_text.SetLabel("Enter speed in knots (e.g. 300)")
+                self.helper_text.SetLabel("Enter speed in knots, 3 digits (e.g. 300)")
 
             self._on_value_change(None)
         else:
@@ -101,20 +111,28 @@ class WhenCanWeDialog(wx.Dialog):
 
         self.Fit()
 
-    def _on_value_change(self, _):
-        """Validate value field."""
-        idx = self._get_selected_index()
-        _, needs_value = self.MESSAGE_TYPES[idx]
+    def _value(self):
+        """The value as typed, without surrounding whitespace."""
+        return self.value_text.GetValue().strip()
 
-        if not needs_value:
+    def _on_value_change(self, _):
+        """Enable OK when the value fits the selected type's rule."""
+        label, rule = self.MESSAGE_TYPES[self._get_selected_index()]
+
+        if rule is None:
             self.ok_button.Enable()
             return
 
-        value = self.value_text.GetValue().strip()
-        if value.isdigit() and 2 <= len(value) <= 3:
-            self.ok_button.Enable()
+        # FLIGHT_LEVEL and MACH are both r"\d{2,3}": CPython folds equal
+        # string literals in the same module into one object, so "rule is
+        # FLIGHT_LEVEL" would also be true for the Mach rule. Dispatch on the
+        # label instead, as _on_type_change and get_message_text already do.
+        value = self._value()
+        if "FL" in label:
+            ok = is_flight_level(value)
         else:
-            self.ok_button.Disable()
+            ok = matches(rule, value)
+        self.ok_button.Enable(ok)
 
     def get_message_text(self):
         """Build the full WHEN CAN WE EXPECT message text.
@@ -122,21 +140,18 @@ class WhenCanWeDialog(wx.Dialog):
         Returns:
             str: The complete message text
         """
-        idx = self._get_selected_index()
-        label, needs_value = self.MESSAGE_TYPES[idx]
+        label, rule = self.MESSAGE_TYPES[self._get_selected_index()]
 
-        if not needs_value:
+        if rule is None:
             return f"WHEN CAN WE EXPECT {label}"
 
-        value = self.value_text.GetValue().strip()
+        value = self._value()
 
         if "FL" in label:
             # CLIMB TO FL / DESCENT TO FL
-            return f"WHEN CAN WE EXPECT {label}{value}"
+            return f"WHEN CAN WE EXPECT {label}{pad_three(value)}"
         elif label == "Mach":
-            if len(value) == 2:
-                value = "0" + value
-            return f"WHEN CAN WE EXPECT M{value}"
+            return f"WHEN CAN WE EXPECT M{pad_three(value)}"
         else:
             # Speed in knots
             return f"WHEN CAN WE EXPECT {value}K"

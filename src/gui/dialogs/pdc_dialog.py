@@ -154,9 +154,9 @@ class PDCDialog(wx.Dialog):
             tuple: (origin_icao, destination_icao, aircraft_code, stand_designator, atis_code)
         """
         return (
-            self.origin_icao_text.GetValue().upper(),
-            self.destination_icao_text.GetValue().upper(),
-            self.aircraft_text.GetValue().upper(),
-            self.stand_text.GetValue(),
-            self.atis_text.GetValue().upper(),
+            self.origin_icao_text.GetValue().strip().upper(),
+            self.destination_icao_text.GetValue().strip().upper(),
+            self.aircraft_text.GetValue().strip().upper(),
+            self.stand_text.GetValue().strip(),
+            self.atis_text.GetValue().strip().upper(),
         )

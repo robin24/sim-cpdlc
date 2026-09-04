@@ -9,7 +9,7 @@ which is what the worker thread posts back through wx.CallAfter.
 import pytest
 from hoppie_connector import HoppieError
 
-from src.model.weather_monitor import WeatherMonitor
+from src.model.weather_monitor import MAX_CONSECUTIVE_ERRORS, WeatherMonitor
 from tests.support import inline_worker
 
 
@@ -282,3 +282,86 @@ def test_a_failed_fetch_counts_against_the_subscription(logger, frame):
     worker.run_pending()
 
     assert monitor.get_subscriptions()[0].error_count == 1
+
+
+# --- change listeners ----------------------------------------------------------
+
+
+def test_listeners_hear_the_subscription_list_change(logger, frame):
+    monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
+    monitor._parent = frame
+    counts = []
+    stop_listening = monitor.subscribe_to_changes(lambda: counts.append(monitor.count()))
+
+    monitor.subscribe("EGLL", "vatatis")
+    monitor.subscribe("EGLL", "vatatis")  # already watched: nothing changed
+    monitor.unsubscribe("EGLL", "vatatis")
+    monitor.unsubscribe("EGLL", "vatatis")  # already gone: nothing changed
+    monitor.subscribe("EGKK", "metar")
+    monitor.clear()
+    monitor.clear()  # already empty: nothing changed
+
+    assert counts == [1, 0, 1, 0]
+
+    stop_listening()
+    stop_listening()  # a second call is harmless
+    monitor.subscribe("EGLL", "vatatis")
+    assert counts == [1, 0, 1, 0]
+
+
+def test_listeners_hear_a_successful_check_and_a_dropped_subscription(logger, frame):
+    """The dialog shows "last checked" and lists dropped reports until told
+    otherwise, so both events have to reach it. Failed checks short of the
+    limit change nothing it shows."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
+    monitor._parent = frame
+    monitor.subscribe("EGLL", "metar")
+    changes = []
+    monitor.subscribe_to_changes(lambda: changes.append(monitor.count()))
+
+    monitor._on_result("EGLL", "metar", "EGLL 261150Z 24010KT Q1013", None)
+    assert changes == [1]
+
+    for _ in range(MAX_CONSECUTIVE_ERRORS - 1):
+        monitor._on_result("EGLL", "metar", None, "timeout")
+    assert changes == [1]
+
+    monitor._on_result("EGLL", "metar", None, "timeout")
+    assert changes == [1, 0]
+
+
+def test_a_listener_that_raises_is_dropped_and_the_others_still_run(logger, frame):
+    """A dialog wx has already destroyed raises from its list; that must not
+    break the update cycle for the rest of the session. It is dropped after
+    the first raise, so it is not called again."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
+    monitor._parent = frame
+    heard = []
+    raised = []
+
+    def broken():
+        raised.append("raised")
+        raise RuntimeError("wrapped C++ object has been deleted")
+
+    monitor.subscribe_to_changes(broken)
+    monitor.subscribe_to_changes(lambda: heard.append(monitor.count()))
+
+    monitor.subscribe("EGLL", "vatatis")
+    monitor.unsubscribe("EGLL", "vatatis")
+
+    assert heard == [1, 0]
+    assert raised == ["raised"]
+
+
+def test_shutdown_drops_listeners_so_a_later_subscribe_does_not_reach_them(logger, frame):
+    """A listener must not outlive the monitor's data: shutdown() is the end
+    of the session, and no dialog can still be open to receive it."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
+    monitor._parent = frame
+    heard = []
+    monitor.subscribe_to_changes(lambda: heard.append(monitor.count()))
+
+    monitor.shutdown()
+    monitor.subscribe("EGLL", "metar")
+
+    assert heard == []

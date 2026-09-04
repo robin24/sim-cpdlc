@@ -6,6 +6,7 @@ import re
 import sys
 import webbrowser
 from contextlib import contextmanager
+from pathlib import Path
 
 import wx
 import wx.adv
@@ -51,23 +52,39 @@ from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
-# A HANDOVER names the next station as a 4-letter code; the @ separators the
-# networks wrap it in have been flattened to spaces by then.
-HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+([A-Z]{4})$")
+# A HANDOVER names the next station as a 4-letter code. _protocol_text has
+# already flattened the @ separators some networks wrap the code in to plain
+# spaces before this ever runs, and trailing free text is allowed. The word
+# boundary keeps "HANDOVER EDGGX" from reading as a handover to EDGG.
+HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+@?([A-Z]{4})\b")
+
+# The directory that holds app.py, src/ and assets/: two levels above this
+# file. A frozen build unpacks the same layout into sys._MEIPASS.
+_SOURCE_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def resource_path(relative_path):
+    """Absolute path of a bundled file, in a checkout or a PyInstaller build.
+
+    The working directory plays no part: a checkout started from another
+    folder used to lose its notification sound and warn about it on every
+    start.
+
+    Args:
+        relative_path: Path below the source root, e.g. "assets/message.wav"
+
+    Returns:
+        str: The absolute path
+    """
+    if getattr(sys, "frozen", False):
+        base_path = getattr(sys, "_MEIPASS", _SOURCE_ROOT)
+    else:
+        base_path = _SOURCE_ROOT
+    return os.path.join(base_path, relative_path)
 
 
 class MainWindow(wx.Frame):
     """Main application window for the Sim-CPDLC client."""
-
-    def resource_path(self, relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller."""
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-        except Exception:
-            base_path = os.path.abspath(".")
-
-        return os.path.join(base_path, relative_path)
 
     def __init__(self, parent, title, logger):
         """Initialize the main window with UI and connection settings."""
@@ -92,7 +109,7 @@ class MainWindow(wx.Frame):
         self.simconnect_manager = SimConnectManager()
 
         # Initialize sound for new messages
-        sound_path = self.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
+        sound_path = resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
         if os.path.exists(sound_path):
             self.new_message_sound = wx.adv.Sound(sound_path)
         else:
@@ -320,12 +337,13 @@ class MainWindow(wx.Frame):
             config["auto_check_updates"] = new_auto_check_updates
             config["auto_tune_com1"] = new_auto_tune_com1
             config["weather_update_interval"] = new_weather_interval
-            self.weather_monitor.set_interval(new_weather_interval * 60000)
             if save_config(config):
+                self.weather_monitor.set_interval(new_weather_interval * 60000)
                 self._auto_tune_com1 = new_auto_tune_com1
                 self.logger.info("Settings saved successfully")
                 self._message_box(
-                    "Settings saved successfully. The new settings will be used for future operations.",
+                    "Settings saved. The weather interval applies now; "
+                    "logon codes apply to the next connection.",
                     "Settings Saved",
                     wx.OK | wx.ICON_INFORMATION,
                 )
@@ -511,15 +529,6 @@ class MainWindow(wx.Frame):
                 return
 
             station = dlg.get_logon_details()
-
-            # Validate station name is exactly 4 characters
-            if len(station) != 4:
-                self._message_box(
-                    "Station name must be exactly 4 characters long.",
-                    "Invalid Station Name",
-                    wx.OK | wx.ICON_ERROR,
-                )
-                return
 
             previous = self.cpdlc_session.get_current_station()
             self.SetStatusText(f"Logging on to {station}...")
@@ -1064,7 +1073,9 @@ class MainWindow(wx.Frame):
             )
             return
 
-        with self._show_dialog(WeatherSubscriptionsDialog(self, self.weather_monitor)):
+        with self._show_dialog(
+            WeatherSubscriptionsDialog(self, self.weather_monitor, self._stop_weather_updates)
+        ):
             pass
 
     def _on_weather_update(self, subscription, text, description):
@@ -1261,6 +1272,23 @@ class MainWindow(wx.Frame):
         """
         return self.weather_monitor.is_subscribed(icao, info_type)
 
+    def _stop_weather_updates(self, icao, info_type):
+        """Stop automatic updates for a report and say so.
+
+        The report's context menu and the subscriptions dialog both come
+        through here, so the SYSTEM row and the status text read the same.
+
+        Args:
+            icao: Airport ICAO code
+            info_type: Report type key
+        """
+        label = report_type_label(info_type)
+        self.weather_monitor.unsubscribe(icao, info_type)
+        self._add_custom_message(
+            f"Stopped automatic updates for {label} {icao}", "SYSTEM"
+        )
+        self.SetStatusText(f"Stopped watching {label} {icao}.")
+
     def _on_toggle_weather_updates(self, icao, info_type, text=None):
         """Start or stop automatic updates for a report.
 
@@ -1274,11 +1302,7 @@ class MainWindow(wx.Frame):
         label = report_type_label(info_type)
 
         if self.weather_monitor.is_subscribed(icao, info_type):
-            self.weather_monitor.unsubscribe(icao, info_type)
-            self._add_custom_message(
-                f"Stopped automatic updates for {label} {icao}", "SYSTEM"
-            )
-            self.SetStatusText(f"Stopped watching {label} {icao}.")
+            self._stop_weather_updates(icao, info_type)
             return
 
         self.weather_monitor.subscribe(icao, info_type, initial_text=text)

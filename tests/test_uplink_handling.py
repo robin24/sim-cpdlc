@@ -83,6 +83,38 @@ def test_a_handover_keeps_the_old_station_answerable(logger):
     assert session.is_answerable_sender(CURRENT) is True
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "HANDOVER @EDGG@",
+        "HANDOVER EDGG",
+        "HANDOVER @EDGG@ CONTACT ON 132.850",
+        "HANDOVER @EDGG@ EXPECT LOGON",
+    ],
+    ids=["wrapped", "bare", "with-contact", "with-note"],
+)
+def test_a_handover_is_followed_whatever_surrounds_the_station(logger, text):
+    """The pattern demanded the exact form; trailing text left the pilot
+    logged on to a station that had already handed them over."""
+    window, session, connection, _ = build(logger)
+
+    window._on_message_received(uplink(CURRENT, 48, text, rr=RR.NOT_REQUIRED))
+    window.worker.run_pending()
+
+    assert session.pending_logon_station == "EDGG"
+    assert connection.sent == [("EDGG", 1, RR.YES.value, "REQUEST LOGON", None)]
+
+
+def test_a_handover_to_something_that_is_not_a_station_is_only_shown(logger):
+    window, session, connection, _ = build(logger)
+
+    window._on_message_received(uplink(CURRENT, 48, "HANDOVER @EDGGX@", rr=RR.NOT_REQUIRED))
+
+    assert session.get_current_station() == CURRENT
+    assert connection.sent == []
+    assert len(window.message_view.added) == 1
+
+
 def test_the_logged_handover_sequence_tunes_and_answers_the_late_contact(logger):
     """Verbatim from the log: KUSA hands over to CZYZ, and the next poll
     carries KUSA's CONTACT together with CZYZ's LOGON ACCEPTED. Older builds

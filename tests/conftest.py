@@ -130,3 +130,21 @@ def frame(wx_app):
     frame = wx.Frame(None)
     yield frame
     frame.Destroy()
+
+
+@pytest.fixture
+def dialog(frame):
+    """Builds a dialog on the shared frame and destroys it, whatever the test does to it.
+
+    Usage: ``instance = dialog(SomeDialog, *constructor_args)``.
+    """
+    built = []
+
+    def build(factory, *args, **kwargs):
+        instance = factory(frame, *args, **kwargs)
+        built.append(instance)
+        return instance
+
+    yield build
+    for instance in built:
+        instance.Destroy()

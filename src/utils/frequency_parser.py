@@ -3,14 +3,14 @@
 import re
 from typing import Optional
 
-# Match CONTACT or MONITOR, followed by unit name(s), optional ON, then frequency
+# Match CONTACT or MONITOR, an optional unit name, optional ON, then frequency
 _FREQ_PATTERN = re.compile(
     r"(?:CONTACT|MONITOR)\s+"  # CONTACT or MONITOR keyword
-    r".+?\s+"  # Unit name (one or more words, non-greedy)
+    r"(?:.+?\s+)?"  # Optional unit name (one or more words, non-greedy)
     r"(?:ON\s+)?"  # Optional ON keyword
     r"(\d{3}\.\d{1,3})"  # Frequency: 3 digits, dot, 1-3 digits
     r"(?:\s*MHZ)?",  # Optional MHZ suffix
-    re.IGNORECASE | re.DOTALL,  # DOTALL so \s+ matches newlines
+    re.IGNORECASE | re.DOTALL,  # DOTALL so the unit name may span a line break
 )
 
 

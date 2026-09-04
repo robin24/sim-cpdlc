@@ -4,6 +4,10 @@ import wx
 
 from src.model.message_manager import MessageManager, WeatherReport
 
+# The Message column never shrinks below this, so a narrow window scrolls
+# sideways instead of truncating every row.
+MIN_MESSAGE_COLUMN_WIDTH = 200
+
 
 class MessageView:
     """Handles display and interaction with CPDLC messages."""
@@ -58,8 +62,8 @@ class MessageView:
         self.message_list = wx.ListCtrl(
             self.parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL
         )
-        self.message_list.InsertColumn(0, "Sender", width=-1)
-        self.message_list.InsertColumn(1, "Message", width=-1)
+        self.message_list.InsertColumn(0, "Sender")
+        self.message_list.InsertColumn(1, "Message")
         self.message_list.SetToolTip("Messages received from the CPDLC network.")
         hbox.Add(self.message_list, 1, wx.ALL, 5)
 
@@ -75,6 +79,8 @@ class MessageView:
         # Bind events
         self.message_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_message_selected)
         self.message_list.Bind(wx.EVT_CONTEXT_MENU, self.on_context_menu)
+        self.message_list.Bind(wx.EVT_SIZE, self._on_list_size)
+        self._fit_columns()
 
     def add_message(self, message_id: int):
         """Add a message to the list view.
@@ -89,11 +95,34 @@ class MessageView:
         index = self.message_list.InsertItem(self.message_list.GetItemCount(), sender)
         self.message_list.SetItem(index, 1, display_text)
         self.message_list.SetItemData(index, message_id)
+        self._fit_columns()
 
     def clear(self):
         """Clear all messages from the view."""
         self.message_list.DeleteAllItems()
         self.message_detail.Clear()
+        self._fit_columns()
+
+    def _fit_columns(self):
+        """Size the Sender column to its content and give the Message column the rest.
+
+        A column autosized once, while the list is still empty, stays a few
+        characters wide for the rest of the session.
+        """
+        lst = self.message_list
+        lst.SetColumnWidth(0, wx.LIST_AUTOSIZE)
+        by_content = lst.GetColumnWidth(0)
+        lst.SetColumnWidth(0, wx.LIST_AUTOSIZE_USEHEADER)
+        sender_width = max(by_content, lst.GetColumnWidth(0))
+        lst.SetColumnWidth(0, sender_width)
+
+        remaining = lst.GetClientSize().width - sender_width
+        lst.SetColumnWidth(1, max(remaining, MIN_MESSAGE_COLUMN_WIDTH))
+
+    def _on_list_size(self, event):
+        """Re-fit the columns whenever the list is resized."""
+        event.Skip()
+        self._fit_columns()
 
     def on_message_selected(self, event):
         """Handle message selection in the list.

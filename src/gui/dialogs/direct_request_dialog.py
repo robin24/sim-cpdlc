@@ -8,6 +8,7 @@ from src.model.cpdlc_elements import (
     REASON_AIRCRAFT_PERFORMANCE,
     REASON_WEATHER,
 )
+from src.gui.dialogs.validation import FIX, matches
 
 
 class DirectRequestDialog(wx.Dialog):
@@ -25,11 +26,11 @@ class DirectRequestDialog(wx.Dialog):
         self.fix_text = wx.TextCtrl(self)
         vbox.Add(self.fix_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        helper_text = wx.StaticText(
-            self, label="Enter waypoint name (2-5 letters, e.g. KONOL)"
+        self.helper_text = wx.StaticText(
+            self, label="2-7 letters or digits, e.g. KONOL or 55N020W"
         )
-        helper_text.SetForegroundColour(wx.Colour(100, 100, 100))
-        vbox.Add(helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))
+        vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons
         reason_label = wx.StaticText(self, label="Reason (optional):")
@@ -59,13 +60,13 @@ class DirectRequestDialog(wx.Dialog):
 
         self.fix_text.Bind(wx.EVT_TEXT, self.on_text_change)
 
+    def _fix(self):
+        """The fix as it would be sent: stripped and upper-cased."""
+        return self.fix_text.GetValue().strip().upper()
+
     def on_text_change(self, _):
-        """Enable OK button if fix name is valid (2-5 uppercase alpha chars)."""
-        fix = self.fix_text.GetValue().strip().upper()
-        if 2 <= len(fix) <= 5 and fix.isalpha():
-            self.ok_button.Enable()
-        else:
-            self.ok_button.Disable()
+        """Enable OK only for 2-7 ASCII letters or digits."""
+        self.ok_button.Enable(matches(FIX, self._fix()))
 
     def get_direct_details(self):
         """Get the direct-to request details.
@@ -73,7 +74,7 @@ class DirectRequestDialog(wx.Dialog):
         Returns:
             tuple: (fix, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
-        fix = self.fix_text.GetValue().strip().upper()
+        fix = self._fix()
 
         reason = None
         if self.reason_weather.GetValue():

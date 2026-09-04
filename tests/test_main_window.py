@@ -9,16 +9,18 @@ Distinct from test_main_window_wiring.py, which runs _init_ui alone on a
 stripped-down frame; this builds the whole window.
 """
 
+import os
 import sys
 
 import pytest
 import wx
 
 import src.gui.main_window as mw
-from src.config import DEFAULT_CONFIG, save_config
-from src.gui.dialogs import WeatherDialog
+from src.config import DEFAULT_CONFIG, MESSAGE_SOUND_FILENAME, save_config
+from src.gui.dialogs import WeatherDialog, WeatherSubscriptionsDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
+from src.utils.weather_parsing import report_type_label
 from tests.support import FakeConnectionManager, FakeSimConnectManager
 
 # Which handler each menu item must fire. Every handler is replaced on the
@@ -461,7 +463,7 @@ def test_the_automatic_update_check_runs_in_a_packaged_build(build_window, monke
 
 
 class FakeSettingsDialog:
-    """Stands in for SettingsDialog: answers OK with auto-tune switched off."""
+    """Stands in for SettingsDialog: answers OK with auto-tune off and a 7-minute weather interval."""
 
     def __init__(self, *args, **kwargs):
         pass
@@ -470,7 +472,7 @@ class FakeSettingsDialog:
         return wx.ID_OK
 
     def get_settings(self):
-        return ("", "", "", False, False, 5)
+        return ("", "", "", False, False, 7)
 
     def Destroy(self):
         pass
@@ -485,3 +487,131 @@ def test_saving_settings_refreshes_the_auto_tune_cache(window, monkeypatch):
     window.on_settings(None)
 
     assert window._auto_tune_com1 is False
+
+
+def test_saved_settings_apply_the_weather_interval_at_once(window, monkeypatch, message_boxes):
+    monkeypatch.setattr(mw, "SettingsDialog", FakeSettingsDialog)
+
+    window.on_settings(None)
+
+    assert window.weather_monitor.interval_ms == 7 * 60000
+    assert message_boxes.calls[-1][:2] == (
+        "Settings saved. The weather interval applies now; logon codes apply to the next connection.",
+        "Settings Saved",
+    )
+
+
+def test_a_failed_save_changes_nothing(window, monkeypatch, message_boxes):
+    """The session and the file must agree: a setting the file did not take
+    is not applied for the rest of the session either."""
+    monkeypatch.setattr(mw, "SettingsDialog", FakeSettingsDialog)
+    monkeypatch.setattr(mw, "save_config", lambda config: False)
+    interval_before = window.weather_monitor.interval_ms
+
+    window.on_settings(None)
+
+    assert window.weather_monitor.interval_ms == interval_before
+    assert window._auto_tune_com1 is True
+    assert message_boxes.captions[-1] == "Error"
+
+
+# --- bundled files -------------------------------------------------------------
+
+
+def test_the_sound_is_found_from_any_working_directory(monkeypatch, tmp_path):
+    """python C:\\...\\app.py run from another folder used to warn that the
+    sound was missing, because the lookup went through the working directory."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    path = mw.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
+
+    assert os.path.isfile(path)
+
+
+def test_a_frozen_build_looks_in_the_unpacked_bundle(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    assert mw.resource_path("assets/message.wav") == os.path.join(
+        str(tmp_path), "assets/message.wav"
+    )
+
+
+def test_the_window_loads_its_sound_from_another_working_directory(build_window, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    window = build_window()
+
+    assert window.new_message_sound is not None
+
+
+# --- stopping automatic weather updates ------------------------------------------
+
+
+def test_stopping_updates_from_the_subscriptions_dialog_is_announced(window):
+    """The dialog's Stop button used to remove the row silently, while the
+    other two stop paths add a SYSTEM row and set the status text."""
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+    label = report_type_label("vatatis")
+
+    window._stop_weather_updates("EGLL", "vatatis")
+
+    assert window.weather_monitor.count() == 0
+    row = last_row(window)
+    assert window.message_view.message_list.GetItemText(row, 0) == "SYSTEM"
+    assert window.message_view.message_list.GetItemText(row, 1) == (
+        f"Stopped automatic updates for {label} EGLL"
+    )
+    assert window.GetStatusBar().GetStatusText() == f"Stopped watching {label} EGLL."
+
+
+def test_the_subscriptions_dialog_stops_reports_through_the_window(window, monkeypatch):
+    opened = []
+
+    class FakeSubscriptionsDialog:
+        def __init__(self, parent, weather_monitor, on_stop):
+            opened.append((weather_monitor, on_stop))
+
+        def ShowModal(self):
+            return wx.ID_CANCEL
+
+        def Destroy(self):
+            pass
+
+    monkeypatch.setattr(mw, "WeatherSubscriptionsDialog", FakeSubscriptionsDialog)
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+
+    window.on_weather_subscriptions(None)
+
+    assert opened == [(window.weather_monitor, window._stop_weather_updates)]
+
+
+def test_stop_all_through_the_real_dialog_stops_and_announces_every_report(window, message_boxes):
+    """The real dialog wired to the real window: Stop all must clear every
+    subscription, empty the dialog's own list, and announce each report
+    through the window so it reads the same as a stop from the context menu."""
+    window.weather_monitor.subscribe("EGKK", "metar")
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+
+    dlg = WeatherSubscriptionsDialog(window, window.weather_monitor, window._stop_weather_updates)
+    try:
+        message_boxes.answer = wx.YES
+
+        dlg.on_stop_all(None)
+
+        assert window.weather_monitor.count() == 0
+        assert dlg.subscription_list.GetCount() == 0
+
+        count = window.message_view.message_list.GetItemCount()
+        metar_row, atis_row = count - 2, count - 1
+        assert window.message_view.message_list.GetItemText(metar_row, 0) == "SYSTEM"
+        assert window.message_view.message_list.GetItemText(metar_row, 1) == (
+            f"Stopped automatic updates for {report_type_label('metar')} EGKK"
+        )
+        assert window.message_view.message_list.GetItemText(atis_row, 0) == "SYSTEM"
+        assert window.message_view.message_list.GetItemText(atis_row, 1) == (
+            f"Stopped automatic updates for {report_type_label('vatatis')} EGLL"
+        )
+    finally:
+        dlg.Destroy()

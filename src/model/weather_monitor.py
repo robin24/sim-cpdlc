@@ -95,6 +95,8 @@ class WeatherMonitor:
         # ignored. _cycle_pending counts the current cycle's outstanding jobs.
         self._cycle_id = 0
         self._cycle_pending = 0
+        # Zero-argument callables told after every change a dialog could show.
+        self._listeners = []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -136,6 +138,9 @@ class WeatherMonitor:
         """Stop the timer and drop every subscription."""
         self.stop()
         self._subscriptions.clear()
+        # A dialog cannot be open when the application shuts down, but a
+        # listener must not outlive the monitor's data.
+        self._listeners.clear()
         if self._timer is not None:
             self._timer.Destroy()
             self._timer = None
@@ -188,6 +193,7 @@ class WeatherMonitor:
 
         self._subscriptions[subscription.key] = subscription
         self.logger.info(f"Subscribed to automatic updates: {subscription.describe()}")
+        self._notify_changed()
         return True
 
     def unsubscribe(self, icao, info_type):
@@ -206,6 +212,7 @@ class WeatherMonitor:
             self.logger.info(
                 f"Unsubscribed from automatic updates: {subscription.describe()}"
             )
+            self._notify_changed()
             return True
         return False
 
@@ -225,11 +232,51 @@ class WeatherMonitor:
 
     def clear(self):
         """Drop every subscription."""
-        if self._subscriptions:
-            self.logger.info(
-                f"Cleared {len(self._subscriptions)} weather subscription(s)"
-            )
+        if not self._subscriptions:
+            return
+        self.logger.info(f"Cleared {len(self._subscriptions)} weather subscription(s)")
         self._subscriptions.clear()
+        self._notify_changed()
+
+    # ------------------------------------------------------------------
+    # Change notification
+    # ------------------------------------------------------------------
+
+    def subscribe_to_changes(self, callback):
+        """Call back whenever the subscription list or a check time changes.
+
+        The subscriptions dialog uses this to stay current while it is open:
+        a report dropped after repeated failures, or checked by a cycle,
+        would otherwise be listed as it was when the dialog opened.
+
+        Args:
+            callback: Callable() run on the GUI thread after each change
+
+        Returns:
+            Callable() that stops the notifications; calling it twice is safe
+        """
+        self._listeners.append(callback)
+
+        def stop_listening():
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+
+        return stop_listening
+
+    def _notify_changed(self):
+        """Tell every listener that something they show may have changed.
+
+        A listener that raises is dropped: a dialog wx has already destroyed
+        must not be able to break the update cycle for the rest of the
+        session.
+        """
+        for callback in list(self._listeners):
+            try:
+                callback()
+            except Exception:
+                self.logger.exception("Error in a weather subscription listener")
+                if callback in self._listeners:
+                    self._listeners.remove(callback)
 
     # ------------------------------------------------------------------
     # Update cycle
@@ -347,10 +394,12 @@ class WeatherMonitor:
                 )
                 if self.on_error:
                     self.on_error(subscription, error)
+                self._notify_changed()
             return
 
         subscription.error_count = 0
         subscription.last_update = time.time()
+        self._notify_changed()
 
         signature = report_signature(text, info_type, icao)
         if signature == subscription.signature:

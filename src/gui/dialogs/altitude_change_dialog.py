@@ -8,6 +8,7 @@ from src.model.cpdlc_elements import (
     REASON_AIRCRAFT_PERFORMANCE,
     REASON_WEATHER,
 )
+from src.gui.dialogs.validation import is_flight_level, pad_three
 
 
 class AltitudeChangeDialog(wx.Dialog):
@@ -34,11 +35,12 @@ class AltitudeChangeDialog(wx.Dialog):
         vbox.Add(self.altitude_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Add a helper text for altitude format
-        helper_text = wx.StaticText(
-            self, label="Enter flight level without 'FL' prefix (e.g., 350 for FL350)"
+        self.helper_text = wx.StaticText(
+            self,
+            label="Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350 for FL350)",
         )
-        helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
-        vbox.Add(helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
+        vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons
         reason_label = wx.StaticText(self, label="Reason (optional):")
@@ -69,33 +71,23 @@ class AltitudeChangeDialog(wx.Dialog):
 
         self.altitude_text.Bind(wx.EVT_TEXT, self.on_text_change)
 
+    def _level(self):
+        """The flight level as typed, without surrounding whitespace."""
+        return self.altitude_text.GetValue().strip()
+
     def on_text_change(self, _):
-        """
-        Enable the OK button if altitude is provided and is a valid number.
-        """
-        # Only enable the OK button if altitude is provided and is a valid number
-        altitude = self.altitude_text.GetValue().strip()
-        try:
-            fl = int(altitude) if altitude else 0
-            if 10 <= fl <= 600:
-                self.ok_button.Enable()
-            else:
-                self.ok_button.Disable()
-        except ValueError:
-            self.ok_button.Disable()
+        """Enable OK only for two or three ASCII digits from FL010 to FL600."""
+        self.ok_button.Enable(is_flight_level(self._level()))
 
     def get_altitude_details(self):
         """
         Get the altitude details entered by the user.
 
         Returns:
-            tuple: (altitude, reason) where reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
+            tuple: (altitude, reason) where altitude is "FL" followed by three
+                digits and reason is None, "WEATHER", or "AIRCRAFT PERFORMANCE"
         """
-        altitude = self.altitude_text.GetValue().strip()
-
-        # Format altitude as FL followed by the number
-        if altitude:
-            altitude = f"FL{altitude}"
+        altitude = f"FL{pad_three(self._level())}"
 
         reason = None
         if self.reason_weather.GetValue():
