@@ -10,7 +10,13 @@ from hoppie_connector import CpdlcResponseRequirement as RR
 from src.config import PENDING_LOGON_TIMEOUT_SECONDS
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
-from tests.support import FakeClock, FakeConnectionManager, make_main_window, uplink
+from tests.support import (
+    FakeClock,
+    FakeConnectionManager,
+    inline_worker,
+    make_main_window,
+    uplink,
+)
 
 
 def _logon_accepted_from(station, mrn):
@@ -20,7 +26,7 @@ def _logon_accepted_from(station, mrn):
 
 
 def test_status_bar_is_silent_when_logon_acceptance_is_rejected(logger):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = CpdlcSession(logger, FakeConnectionManager(), worker=inline_worker(logger))
     session.logon("EDGG")
     session.logon("EDDF")
     window = make_main_window(logger, session, MessageManager(logger))
@@ -32,7 +38,7 @@ def test_status_bar_is_silent_when_logon_acceptance_is_rejected(logger):
 
 
 def test_status_bar_reports_an_accepted_logon(logger):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = CpdlcSession(logger, FakeConnectionManager(), worker=inline_worker(logger))
     session.logon("EDDF")
     window = make_main_window(logger, session, MessageManager(logger))
 
@@ -43,7 +49,7 @@ def test_status_bar_reports_an_accepted_logon(logger):
 
 
 def test_status_bar_is_silent_when_the_mrn_does_not_match(logger):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = CpdlcSession(logger, FakeConnectionManager(), worker=inline_worker(logger))
     session.logon("EDDF")
     window = make_main_window(logger, session, MessageManager(logger))
 
@@ -56,7 +62,9 @@ def test_status_bar_is_silent_when_the_mrn_does_not_match(logger):
 def test_an_unanswered_logon_is_given_up_on_and_announced(logger):
     """Audit L-3: a pending logon never expired, so the status bar said
     "Pending logon to X." for the rest of the flight."""
-    session = CpdlcSession(logger, FakeConnectionManager(), clock=FakeClock())
+    session = CpdlcSession(
+        logger, FakeConnectionManager(), clock=FakeClock(), worker=inline_worker(logger)
+    )
     session.logon("EDDF")
     window = make_main_window(logger, session, MessageManager(logger))
 

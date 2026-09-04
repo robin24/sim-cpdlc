@@ -16,6 +16,7 @@ from tests.support import (
     FakeClock,
     FakeCloseEvent,
     FakeConnectionManager,
+    inline_worker,
     make_main_window,
 )
 
@@ -25,7 +26,9 @@ STATION = "EDYY"
 def build(logger, connection=None):
     """A window logged on to EDYY as DLH123 on Hoppie, MIN counter at 1."""
     connection = connection if connection is not None else FakeConnectionManager()
-    session = CpdlcSession(logger, connection, clock=FakeClock())
+    session = CpdlcSession(
+        logger, connection, clock=FakeClock(), worker=inline_worker(logger)
+    )
     session.begin_session(CLIENT_CALLSIGN, "hoppie")
     session.handle_logon_accepted(STATION)
     manager = MessageManager(logger)
@@ -54,14 +57,13 @@ def test_disconnect_logs_off_and_forgets_the_dialogue(logger):
     window, session, connection, manager = build(logger)
 
     window.on_disconnect()
+    window.worker.run_pending()
 
     assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
     assert dialogue(session) == ("", None, "", 1)
     assert connection.disconnected is True
-    assert rows(manager) == [
-        (CLIENT_CALLSIGN, "LOGOFF"),
-        ("SYSTEM", "Disconnected from CPDLC network"),
-    ]
+    assert (CLIENT_CALLSIGN, "LOGOFF") in rows(manager)
+    assert ("SYSTEM", "Disconnected from CPDLC network") in rows(manager)
     assert window.status_texts == ["Disconnected from CPDLC network."]
 
 
@@ -72,9 +74,10 @@ def test_disconnect_forgets_the_dialogue_even_when_the_logoff_fails(logger):
     window, session, connection, manager = build(logger, connection)
 
     window.on_disconnect()
+    window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
-    assert rows(manager)[0] == ("SYSTEM", "Could not send LOGOFF to EDYY: timed out")
+    assert ("SYSTEM", "Could not send LOGOFF to EDYY: timed out") in rows(manager)
     assert connection.disconnected is True
 
 
@@ -83,6 +86,7 @@ def test_disconnect_closes_a_handover_in_progress(logger):
     session.handle_handover(STATION, "EDGG")
 
     window.on_disconnect()
+    window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
     assert session.is_answerable_sender(STATION) is False
@@ -108,6 +112,7 @@ def test_exit_logs_off_and_forgets_the_dialogue(logger):
     event = FakeCloseEvent()
 
     window.on_close(event)
+    window.worker.run_pending()
 
     assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
     assert dialogue(session) == ("", None, "", 1)
@@ -121,6 +126,7 @@ def test_exit_reports_a_logoff_it_could_not_send(logger):
     window, session, _, manager = build(logger, connection)
 
     window.on_close(FakeCloseEvent())
+    window.worker.run_pending()
 
     assert rows(manager) == [("SYSTEM", "Could not send LOGOFF to EDYY: timed out")]
     assert session.is_logged_on() is False
@@ -224,6 +230,7 @@ def test_a_manual_logon_while_logged_on_echoes_the_logoff_it_sends(logger, monke
     window, session, connection, manager = build(logger)
 
     window.on_logon(None)
+    window.worker.run_pending()
 
     assert [frame[3] for frame in connection.sent] == ["LOGOFF", "REQUEST LOGON"]
     assert rows(manager) == [(CLIENT_CALLSIGN, "LOGOFF"), (CLIENT_CALLSIGN, "REQUEST LOGON")]

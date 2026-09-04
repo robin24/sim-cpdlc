@@ -15,6 +15,7 @@ from tests.support import (
     FakeClock,
     FakeConnectionManager,
     FakeSimConnectManager,
+    inline_worker,
     make_main_window,
     uplink,
 )
@@ -27,7 +28,9 @@ CONTACT = "CONTACT MARSEILLE CONTROL ON @133.325@."
 def build(logger, config=None, simconnect=None, station=CURRENT):
     """A window logged on to `station` ("" for none) as DLH123 on Hoppie."""
     connection = FakeConnectionManager()
-    session = CpdlcSession(logger, connection, clock=FakeClock())
+    session = CpdlcSession(
+        logger, connection, clock=FakeClock(), worker=inline_worker(logger)
+    )
     session.begin_session(CLIENT_CALLSIGN, "hoppie")
     if station:
         session.handle_logon_accepted(station)
@@ -52,6 +55,7 @@ def test_a_handover_logs_off_and_requests_logon_with_the_next_station(logger):
     window, session, connection, _ = build(logger)
 
     window._on_message_received(uplink(CURRENT, 48, "HANDOVER @EDGG@", rr=RR.NOT_REQUIRED))
+    window.worker.run_pending()
 
     assert session.get_current_station() == ""
     assert session.pending_logon_station == "EDGG"
@@ -85,6 +89,7 @@ def test_the_logged_handover_sequence_tunes_and_answers_the_late_contact(logger)
     let the pilot WILCO that CONTACT; the strict scoping on main did not."""
     window, session, connection, simconnect = build(logger, station="KUSA")
     window._on_message_received(uplink("KUSA", 12, "HANDOVER @CZYZ@", rr=RR.NOT_REQUIRED))
+    window.worker.run_pending()
 
     before = len(window.message_view.added)
     window._on_message_received(uplink("KUSA", 13, "CONTACT TORONTO CENTER ON @135.625@."))

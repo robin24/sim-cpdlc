@@ -8,14 +8,14 @@ from src.controller.link_state import LinkState
 from src.model.connection_manager import UnreadableMessage
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
-from tests.support import FakeConnectionManager, make_main_window
+from tests.support import FakeConnectionManager, inline_worker, make_main_window
 
 STATION = "EDYY"
 
 
 def build(logger):
     connection = FakeConnectionManager()
-    session = CpdlcSession(logger, connection)
+    session = CpdlcSession(logger, connection, worker=inline_worker(logger))
     session.begin_session("DLH123", "hoppie")
     session.handle_logon_accepted(STATION)
     manager = MessageManager(logger)
@@ -98,17 +98,6 @@ def test_unreadable_uplinks_become_rows_with_the_chime(logger):
         ("SYSTEM", "Unreadable message from EDGG: /data2/6//R/QNH 1013 / TRL 70")
     ]
     assert window.new_message_sound.played == 1
-
-
-def test_a_fatal_teardown_cancels_a_pending_retry(logger):
-    window, _, _, manager = build(logger)
-    window._retry_later(5000, window._on_acknowledge_message, 1, "WILCO", True)
-    handle = window._pending_retry
-
-    window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
-
-    assert handle.stopped is True
-    assert window._pending_retry is None
 
 
 def test_a_callsign_clash_is_named_once_even_when_it_is_not_the_first_failure(logger):

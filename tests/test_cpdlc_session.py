@@ -6,13 +6,15 @@ from hoppie_connector import HoppieError
 
 from src.config import PENDING_LOGON_TIMEOUT_SECONDS, PREVIOUS_STATION_WINDOW_SECONDS
 from src.model.cpdlc_session import CpdlcSession
-from tests.support import FakeClock, FakeConnectionManager
+from tests.support import FakeClock, FakeConnectionManager, inline_worker
 
 
 def build(logger, connection=None):
     """A session with a hand-driven clock, identified as DLH123 on Hoppie."""
     connection = connection if connection is not None else FakeConnectionManager()
-    session = CpdlcSession(logger, connection, clock=FakeClock())
+    session = CpdlcSession(
+        logger, connection, clock=FakeClock(), worker=inline_worker(logger)
+    )
     session.begin_session("DLH123", "hoppie")
     return session
 
@@ -23,7 +25,7 @@ def test_logon_accepted_from_a_station_other_than_the_pending_one_is_rejected(lo
     Each logon() resets cpdlc_min_counter to 1, so every pending logon carries
     MIN 1 and the MRN alone cannot distinguish which station we asked.
     """
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = build(logger)
     session.logon("EDGG")
     session.logon("EDDF")
 
@@ -34,7 +36,7 @@ def test_logon_accepted_from_a_station_other_than_the_pending_one_is_rejected(lo
 
 
 def test_logon_accepted_from_the_pending_station_is_accepted(logger):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = build(logger)
     session.logon("EDDF")
 
     accepted = session.handle_logon_accepted("EDDF", mrn=1)
@@ -45,7 +47,7 @@ def test_logon_accepted_from_the_pending_station_is_accepted(logger):
 
 def test_unsolicited_logon_accepted_is_still_honoured(logger):
     """Automatic handovers arrive with no pending logon; that path must keep working."""
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = build(logger)
 
     accepted = session.handle_logon_accepted("EDUU", mrn=None)
 
@@ -54,7 +56,7 @@ def test_unsolicited_logon_accepted_is_still_honoured(logger):
 
 
 def test_logon_accepted_with_invalid_station_name_is_rejected(logger):
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = build(logger)
 
     accepted = session.handle_logon_accepted("TOOLONG", mrn=None)
 
@@ -65,7 +67,7 @@ def test_logon_accepted_with_invalid_station_name_is_rejected(logger):
 def test_logon_accepted_with_a_different_mrn_is_rejected(logger):
     """TODOS item 24: the MRN must reference our REQUEST LOGON, which always
     carries MIN 1 because logon() restarts the counter."""
-    session = CpdlcSession(logger, FakeConnectionManager())
+    session = build(logger)
     session.logon("EDDF")
 
     accepted = session.handle_logon_accepted("EDDF", mrn=2)
@@ -155,8 +157,9 @@ def test_logging_on_while_logged_on_sends_logoff_first(logger):
     session.send_altitude_change_request("FL350")  # MIN 1 spent
 
     result = session.logon("EDGG")
+    session.worker.run_pending()
 
-    assert result == (True, "REQUEST LOGON")
+    assert result is True
     assert session.connection_manager.sent[1:] == [
         ("EDYY", 2, "NE", "LOGOFF", None),
         ("EDGG", 1, "Y", "REQUEST LOGON", None),
@@ -170,24 +173,29 @@ def test_relogging_on_to_the_same_station_closes_the_dialogue_first(logger):
     session.handle_logon_accepted("EDYY")
 
     session.logon("EDYY")
+    session.worker.run_pending()
 
     assert [frame[3] for frame in session.connection_manager.sent] == ["LOGOFF", "REQUEST LOGON"]
     assert session.pending_logon_station == "EDYY"
 
 
-def test_a_failed_logoff_aborts_the_new_logon(logger):
-    """The old station must be told before the dialogue moves on, and a link
-    that has just failed would only fail again; the pilot retries instead."""
+def test_a_failed_logoff_does_not_stop_the_new_logon(logger):
+    """Both frames are queued before either goes out (the worker spaces
+    them); each reports for itself, and a REQUEST LOGON that failed to go
+    out leaves nothing pending."""
     connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
     session = build(logger, connection)
     session.handle_logon_accepted("EDYY")
+    outcomes = []
 
-    result = session.logon("EDGG")
+    assert session.logon("EDGG", lambda ok, text: outcomes.append((ok, text))) is True
+    assert session.get_current_station() == ""
+    assert session.pending_logon_station == "EDGG"
 
-    assert result == (False, "could not send LOGOFF to EDYY: timed out")
-    assert session.get_current_station() == "EDYY"
+    session.worker.run_pending()
+
+    assert outcomes == [(False, "timed out"), (False, "timed out")]
     assert session.pending_logon_station is None
-    assert connection.sent == []
 
 
 def test_logoff_clears_a_pending_logon(logger):
@@ -211,8 +219,9 @@ def test_a_handover_moves_the_logon_and_keeps_the_old_station_answerable(logger)
     session.handle_logon_accepted("KUSA")
 
     result = session.handle_handover("KUSA", "CZYZ")
+    session.worker.run_pending()
 
-    assert result == (True, "REQUEST LOGON")
+    assert result is True
     assert session.connection_manager.sent == [("CZYZ", 1, "Y", "REQUEST LOGON", None)]
     assert session.get_current_station() == ""
     assert session.pending_logon_station == "CZYZ"
@@ -238,8 +247,9 @@ def test_a_handover_from_a_station_that_is_not_logged_on_is_ignored(logger):
     session = build(logger)
     session.handle_logon_accepted("KUSA")
 
-    assert session.handle_handover("EDUU", "CZYZ") == (False, None)
+    assert session.handle_handover("EDUU", "CZYZ") is False
     assert session.get_current_station() == "KUSA"
+    session.worker.run_pending()
     assert session.connection_manager.sent == []
 
 
@@ -249,6 +259,7 @@ def test_a_handover_sends_no_logoff(logger):
     session.handle_logon_accepted("KUSA")
 
     session.handle_handover("KUSA", "CZYZ")
+    session.worker.run_pending()
 
     assert [frame[3] for frame in session.connection_manager.sent] == ["REQUEST LOGON"]
 

@@ -2,7 +2,8 @@
 
 The wire format is what a controller reads, so each message is asserted
 literally rather than by shape: a reworded element shows up here instead of on
-the network.
+the network. Sends are queued on the worker, so each test runs the worker
+before looking at what went out.
 """
 
 import pytest
@@ -17,10 +18,10 @@ STATION = "EGGX"
 
 @pytest.fixture
 def make_session(logger):
-    def build(connected=True, station=STATION):
-        session = CpdlcSession(
-            logger, FakeConnectionManager(connected=connected), worker=inline_worker(logger)
-        )
+    def build(connected=True, station=STATION, connection=None):
+        if connection is None:
+            connection = FakeConnectionManager(connected=connected)
+        session = CpdlcSession(logger, connection, worker=inline_worker(logger))
         session.begin_session("BAW123", "hoppie")
         session.current_station = station
         return session
@@ -33,6 +34,20 @@ def session(make_session):
     return make_session()
 
 
+def sent(session):
+    """Run the worker and return the CPDLC frames that went out."""
+    session.worker.run_pending()
+    return session.connection_manager.sent
+
+
+def outcomes_of(session, send):
+    """Queue a send with a recording callback, run the worker, return (queued, outcomes)."""
+    outcomes = []
+    queued = send(lambda success, text: outcomes.append((success, text)))
+    session.worker.run_pending()
+    return queued, outcomes
+
+
 # --- addressing and preconditions ---------------------------------------------
 
 
@@ -41,19 +56,30 @@ def test_each_message_advances_the_min_counter(session):
     session.send_altitude_change_request("FL350")
     session.send_altitude_change_request("FL370")
 
-    assert [frame[1] for frame in session.connection_manager.sent] == [1, 2]
+    assert [frame[1] for frame in sent(session)] == [1, 2]
 
 
 def test_a_request_without_a_station_is_refused(make_session):
     session = make_session(station="")
 
-    assert session.send_altitude_change_request("FL350") == (False, None)
+    assert session.send_altitude_change_request("FL350") is False
+    assert sent(session) == []
 
 
 def test_a_request_without_a_connection_is_refused(make_session):
     session = make_session(connected=False)
 
-    assert session.send_altitude_change_request("FL350") == (False, None)
+    assert session.send_altitude_change_request("FL350") is False
+
+
+def test_a_send_is_queued_not_transmitted_at_once(session):
+    """The GUI thread only queues the frame; the worker transmits it."""
+    assert session.send_altitude_change_request("FL350") is True
+    assert session.connection_manager.sent == []
+
+    session.worker.run_pending()
+
+    assert session.connection_manager.sent == [(STATION, 1, "Y", "REQUEST FL350", None)]
 
 
 # --- weather ------------------------------------------------------------------
@@ -77,12 +103,8 @@ def test_a_weather_request_without_a_connection_is_refused(make_session):
     assert session.request_weather("metar", "EGLL", lambda ok, text: None) is False
 
 
-def test_a_failed_weather_request_reports_the_error(logger):
-    session = CpdlcSession(
-        logger,
-        FakeConnectionManager(raise_with=HoppieError("no data")),
-        worker=inline_worker(logger),
-    )
+def test_a_failed_weather_request_reports_the_error(make_session):
+    session = make_session(connection=FakeConnectionManager(raise_with=HoppieError("no data")))
     outcomes = []
     session.request_weather("metar", "EGLL", lambda ok, text: outcomes.append((ok, text)))
 
@@ -98,17 +120,20 @@ def test_a_performance_reason_uses_the_full_standard_wording(session):
     """DM66 is "DUE TO AIRCRAFT PERFORMANCE". Each dialog used to spell the
     value out for itself, so the short "PERFORMANCE" had spread to all of them.
     """
-    _, text = session.send_altitude_change_request(
-        "FL350", REASON_AIRCRAFT_PERFORMANCE
+    _, outcomes = outcomes_of(
+        session,
+        lambda done: session.send_altitude_change_request("FL350", REASON_AIRCRAFT_PERFORMANCE, done),
     )
 
-    assert text == "REQUEST FL350 DUE TO AIRCRAFT PERFORMANCE"
+    assert outcomes == [(True, "REQUEST FL350 DUE TO AIRCRAFT PERFORMANCE")]
 
 
 def test_a_weather_reason_is_unchanged(session):
-    _, text = session.send_direct_request("MALOT", REASON_WEATHER)
+    _, outcomes = outcomes_of(
+        session, lambda done: session.send_direct_request("MALOT", REASON_WEATHER, done)
+    )
 
-    assert text == "REQUEST DIRECT TO MALOT DUE TO WEATHER"
+    assert outcomes == [(True, "REQUEST DIRECT TO MALOT DUE TO WEATHER")]
 
 
 # --- the remaining downlinks --------------------------------------------------
@@ -117,15 +142,18 @@ def test_a_weather_reason_is_unchanged(session):
 def test_a_logon_request_uses_min_one_and_expects_an_answer(make_session):
     session = make_session(station="")
 
-    assert session.logon("EGGX") == (True, "REQUEST LOGON")
+    queued, outcomes = outcomes_of(session, lambda done: session.logon("EGGX", done))
+
+    assert (queued, outcomes) == (True, [(True, "REQUEST LOGON")])
     assert session.connection_manager.sent == [("EGGX", 1, "Y", "REQUEST LOGON", None)]
     assert (session.pending_logon_station, session.pending_logon_min) == ("EGGX", 1)
 
 
-def test_a_logoff_needs_no_response_and_clears_the_station(session):
-    assert session.logoff() == (True, "LOGOFF")
-    assert session.connection_manager.sent == [(STATION, 1, "NE", "LOGOFF", None)]
+def test_a_logoff_needs_no_response_and_clears_the_station_at_once(session):
+    assert session.logoff() is True
     assert session.get_current_station() == ""
+
+    assert sent(session) == [(STATION, 1, "NE", "LOGOFF", None)]
 
 
 @pytest.mark.parametrize(
@@ -138,13 +166,19 @@ def test_a_logoff_needs_no_response_and_clears_the_station(session):
     ids=["mach", "knots", "mach-with-reason"],
 )
 def test_a_speed_request_names_mach_or_knots(session, speed, is_mach, reason, expected):
-    assert session.send_speed_request(speed, is_mach, reason) == (True, expected)
+    _, outcomes = outcomes_of(
+        session, lambda done: session.send_speed_request(speed, is_mach, reason, done)
+    )
+
+    assert outcomes == [(True, expected)]
 
 
 def test_a_when_can_we_expect_inquiry_is_sent_verbatim(session):
     text = "WHEN CAN WE EXPECT HIGHER LEVEL"
 
-    assert session.send_when_can_we_expect(text) == (True, text)
+    _, outcomes = outcomes_of(session, lambda done: session.send_when_can_we_expect(text, done))
+
+    assert outcomes == [(True, text)]
 
 
 def test_every_request_goes_to_the_current_station_expecting_an_answer(session):
@@ -153,22 +187,26 @@ def test_every_request_goes_to_the_current_station_expecting_an_answer(session):
     session.send_speed_request("082", True)
     session.send_when_can_we_expect("WHEN CAN WE EXPECT LOWER LEVEL")
 
-    frames = session.connection_manager.sent
+    frames = sent(session)
     assert [frame[0] for frame in frames] == [STATION] * 4
     assert [frame[2] for frame in frames] == ["Y"] * 4
     assert [frame[1] for frame in frames] == [1, 2, 3, 4]
 
 
 def test_a_telex_goes_to_its_recipient_unchanged(session):
-    assert session.send_telex("EDDF", "HELLO THERE") == (True, "HELLO THERE")
+    _, outcomes = outcomes_of(session, lambda done: session.send_telex("EDDF", "HELLO THERE", done))
+
+    assert outcomes == [(True, "HELLO THERE")]
     assert session.connection_manager.telexes == [("EDDF", "HELLO THERE")]
 
 
 def test_a_pdc_request_is_a_telex_to_the_departure_airport(session):
-    ok, text = session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")
+    _, outcomes = outcomes_of(
+        session, lambda done: session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K", done)
+    )
 
-    assert ok is True
-    assert text == "REQUEST PREDEP CLEARANCE BAW123 A339 TO LIMC AT EGLL STAND 521 ATIS K"
+    text = "REQUEST PREDEP CLEARANCE BAW123 A339 TO LIMC AT EGLL STAND 521 ATIS K"
+    assert outcomes == [(True, text)]
     assert session.connection_manager.telexes == [("EGLL", text)]
 
 
@@ -176,34 +214,50 @@ def test_a_pdc_request_needs_a_callsign(make_session):
     session = make_session()
     session.callsign = ""
 
-    assert session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K") == (False, None)
+    assert session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K") is False
 
 
 # --- failure paths ------------------------------------------------------------
 
 SENDS = [
-    # (name, station logged on before the send, the send)
-    ("logon", "", lambda s: s.logon("EGGX")),
-    ("logoff", STATION, lambda s: s.logoff()),
-    ("altitude", STATION, lambda s: s.send_altitude_change_request("FL350")),
-    ("direct", STATION, lambda s: s.send_direct_request("MALOT")),
-    ("speed", STATION, lambda s: s.send_speed_request("082", True)),
-    ("when-can-we", STATION, lambda s: s.send_when_can_we_expect("WHEN CAN WE EXPECT HIGHER LEVEL")),
-    ("acknowledgement", STATION, lambda s: s.send_acknowledgement(STATION, 7, "WILCO")),
-    ("telex", STATION, lambda s: s.send_telex("EDDF", "HELLO")),
-    ("pdc", STATION, lambda s: s.send_pdc_request("EGLL", "LIMC", "A339", "521", "K")),
+    # (name, station logged on before the send, the send taking on_done)
+    ("logon", "", lambda s, done: s.logon("EGGX", done)),
+    ("logoff", STATION, lambda s, done: s.logoff(done)),
+    ("altitude", STATION, lambda s, done: s.send_altitude_change_request("FL350", on_done=done)),
+    ("direct", STATION, lambda s, done: s.send_direct_request("MALOT", on_done=done)),
+    ("speed", STATION, lambda s, done: s.send_speed_request("082", True, on_done=done)),
+    ("when-can-we", STATION, lambda s, done: s.send_when_can_we_expect("WHEN CAN WE EXPECT HIGHER LEVEL", done)),
+    ("acknowledgement", STATION, lambda s, done: s.send_acknowledgement(STATION, 7, "WILCO", done)),
+    ("telex", STATION, lambda s, done: s.send_telex("EDDF", "HELLO", done)),
+    ("pdc", STATION, lambda s, done: s.send_pdc_request("EGLL", "LIMC", "A339", "521", "K", done)),
 ]
 
 
 @pytest.mark.parametrize(
     "station, send", [case[1:] for case in SENDS], ids=[case[0] for case in SENDS]
 )
-def test_a_transmission_failure_is_reported_and_consumes_no_min(logger, station, send):
-    """The error text reaches the dialog, and the MIN is not spent, so the
-    next successful send does not leave a gap the station has to explain."""
-    session = CpdlcSession(logger, FakeConnectionManager(raise_with=HoppieError("boom")))
-    session.begin_session("BAW123", "hoppie")
-    session.current_station = station
+def test_a_transmission_failure_reaches_the_callback(make_session, station, send):
+    """The error text reaches the dialog through on_done; nothing was recorded as sent."""
+    session = make_session(
+        station=station, connection=FakeConnectionManager(raise_with=HoppieError("boom"))
+    )
+    outcomes = []
 
-    assert send(session) == (False, "boom")
-    assert session.cpdlc_min_counter == 1
+    assert send(session, lambda success, text: outcomes.append((success, text))) is True
+    session.worker.run_pending()
+
+    assert outcomes == [(False, "boom")]
+    assert (session.connection_manager.sent, session.connection_manager.telexes) == ([], [])
+
+
+def test_a_failed_send_leaves_a_gap_in_the_min_sequence_rather_than_a_reused_number(make_session):
+    """The MIN is spent when the frame is queued. A station does not mind a
+    gap; it does mind seeing a number twice."""
+    session = make_session(connection=FakeConnectionManager(raise_with=HoppieError("boom")))
+    session.send_altitude_change_request("FL350")
+    session.worker.run_pending()
+
+    session.connection_manager.raise_with = None
+    session.send_altitude_change_request("FL370")
+
+    assert sent(session) == [(STATION, 2, "Y", "REQUEST FL370", None)]

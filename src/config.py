@@ -117,11 +117,6 @@ MAX_CONNECTION_FAILURES = 3
 # the session.
 LINK_BACKOFF_MS = (20000, 60000, 120000, 300000)
 
-# SayIntentions answers "rate_limit" to a second message sent within a few
-# seconds of the first. A rate-limited acknowledgement is retried once after
-# this delay.
-RATE_LIMIT_RETRY_MS = 5000
-
 # Every network call runs on one worker thread, which keeps this much time
 # between two sends (SayIntentions answers "rate_limit" to a second message
 # within a few seconds of the first) and between two information requests

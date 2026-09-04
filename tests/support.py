@@ -249,16 +249,6 @@ class FakeSound:
         return True
 
 
-class FakeCallLater:
-    """Stands in for a wx.CallLater handle, recording whether it was cancelled."""
-
-    def __init__(self):
-        self.stopped = False
-
-    def Stop(self):
-        self.stopped = True
-
-
 class FakeCloseEvent:
     """Stands in for the wx.CloseEvent on_close receives."""
 
@@ -353,8 +343,8 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
             defaults in place.
         simconnect: A FakeSimConnectManager; a fresh one when None
 
-    The window's deferred and delayed callbacks (`_defer`, `_retry_later`) run
-    or are recorded synchronously, since there is no event loop.
+    The window's deferred callbacks run synchronously, since there is no event
+    loop; a queued send runs when the test calls window.worker.run_pending().
     """
     from src.gui.main_window import MainWindow
 
@@ -377,15 +367,6 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.new_message_sound = FakeSound()
     # wx.CallAfter needs a running wx.App; run deferred callbacks at once.
     window._defer = lambda callback, *args, **kwargs: callback(*args, **kwargs)
-    # wx.CallLater needs a running wx.App; record delayed callbacks instead.
-    window.retries = []
-    window._pending_retry = None
-
-    def _retry_later(delay_ms, callback, *args):
-        window.retries.append((delay_ms, callback, args))
-        window._pending_retry = FakeCallLater()
-
-    window._retry_later = _retry_later
     window._callsign_clash_announced = False
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
