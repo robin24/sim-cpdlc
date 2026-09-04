@@ -17,15 +17,18 @@ from src.gui.dialogs.validation import (
 class WhenCanWeDialog(wx.Dialog):
     """Dialog for sending 'WHEN CAN WE EXPECT' inquiries."""
 
-    # Message types and the rule their value must match; None means no value.
+    # Message types: the radio label with its access key, the element text
+    # that goes into the downlink, and the rule the value must match (None
+    # means the type takes no value). "M" and "K" are the Mach and knots
+    # markers the text is built around.
     MESSAGE_TYPES = [
-        ("HIGHER LEVEL", None),
-        ("LOWER LEVEL", None),
-        ("BACK ON ROUTE", None),
-        ("CLIMB TO FL", FLIGHT_LEVEL),
-        ("DESCENT TO FL", FLIGHT_LEVEL),
-        ("Mach", MACH),
-        ("Speed (knots)", KNOTS),
+        ("&Higher level", "HIGHER LEVEL", None),
+        ("&Lower level", "LOWER LEVEL", None),
+        ("&Back on route", "BACK ON ROUTE", None),
+        ("&Climb to FL", "CLIMB TO FL", FLIGHT_LEVEL),
+        ("&Descent to FL", "DESCENT TO FL", FLIGHT_LEVEL),
+        ("&Mach", "M", MACH),
+        ("&Speed (knots)", "K", KNOTS),
     ]
 
     def __init__(self, parent):
@@ -39,7 +42,7 @@ class WhenCanWeDialog(wx.Dialog):
         vbox.Add(type_label, 0, wx.ALL, 5)
 
         self.radios = []
-        for i, (label, _) in enumerate(self.MESSAGE_TYPES):
+        for i, (label, _, _) in enumerate(self.MESSAGE_TYPES):
             style = wx.RB_GROUP if i == 0 else 0
             radio = wx.RadioButton(self, label=label, style=style)
             vbox.Add(radio, 0, wx.LEFT | wx.RIGHT, 10)
@@ -85,19 +88,18 @@ class WhenCanWeDialog(wx.Dialog):
 
     def _on_type_change(self, _):
         """Show/hide value field based on selected type."""
-        idx = self._get_selected_index()
-        label, rule = self.MESSAGE_TYPES[idx]
+        _, text, rule = self.MESSAGE_TYPES[self._get_selected_index()]
 
         if rule is not None:
             self.value_label.Show()
             self.value_text.Show()
             self.helper_text.Show()
 
-            if "FL" in label:
+            if text.endswith("FL"):
                 self.helper_text.SetLabel(
                     "Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350)"
                 )
-            elif label == "Mach":
+            elif text == "M":
                 self.helper_text.SetLabel("Enter Mach without decimal (e.g. 082)")
             else:
                 self.helper_text.SetLabel("Enter speed in knots, 3 digits (e.g. 300)")
@@ -117,7 +119,7 @@ class WhenCanWeDialog(wx.Dialog):
 
     def _on_value_change(self, _):
         """Enable OK when the value fits the selected type's rule."""
-        label, rule = self.MESSAGE_TYPES[self._get_selected_index()]
+        _, text, rule = self.MESSAGE_TYPES[self._get_selected_index()]
 
         if rule is None:
             self.ok_button.Enable()
@@ -126,9 +128,9 @@ class WhenCanWeDialog(wx.Dialog):
         # FLIGHT_LEVEL and MACH are both r"\d{2,3}": CPython folds equal
         # string literals in the same module into one object, so "rule is
         # FLIGHT_LEVEL" would also be true for the Mach rule. Dispatch on the
-        # label instead, as _on_type_change and get_message_text already do.
+        # element text instead, as _on_type_change and get_message_text do.
         value = self._value()
-        if "FL" in label:
+        if text.endswith("FL"):
             ok = is_flight_level(value)
         else:
             ok = matches(rule, value)
@@ -140,17 +142,17 @@ class WhenCanWeDialog(wx.Dialog):
         Returns:
             str: The complete message text
         """
-        label, rule = self.MESSAGE_TYPES[self._get_selected_index()]
+        _, text, rule = self.MESSAGE_TYPES[self._get_selected_index()]
 
         if rule is None:
-            return f"WHEN CAN WE EXPECT {label}"
+            return f"WHEN CAN WE EXPECT {text}"
 
         value = self._value()
 
-        if "FL" in label:
+        if text.endswith("FL"):
             # CLIMB TO FL / DESCENT TO FL
-            return f"WHEN CAN WE EXPECT {label}{pad_three(value)}"
-        elif label == "Mach":
+            return f"WHEN CAN WE EXPECT {text}{pad_three(value)}"
+        elif text == "M":
             return f"WHEN CAN WE EXPECT M{pad_three(value)}"
         else:
             # Speed in knots
