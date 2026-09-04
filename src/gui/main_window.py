@@ -601,12 +601,7 @@ class MainWindow(wx.Frame):
 
     def on_logoff(self, _):
         """Initiate logoff from current CPDLC station."""
-        if not self.cpdlc_session.is_logged_on():
-            self._message_box(
-                "You are not currently logged on to any station.",
-                "Not Logged On",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_logon("log off"):
             return
 
         # Confirm logoff
@@ -678,16 +673,9 @@ class MainWindow(wx.Frame):
 
     def on_altitude_change(self, _):
         """Send altitude change request to current station."""
-        # Check if connected and logged on
         if not self._require_connection("request an altitude change"):
             return
-
-        if not self.cpdlc_session.is_logged_on():
-            self._message_box(
-                "You must be logged on to a station to request an altitude change.",
-                "Not Logged On",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_logon("request an altitude change"):
             return
 
         self.logger.debug("Opening altitude change dialog")
@@ -707,15 +695,9 @@ class MainWindow(wx.Frame):
 
     def on_direct_request(self, _):
         """Send a direct-to waypoint request."""
-        if not self._require_connection("send a request"):
+        if not self._require_connection("request a direct routing"):
             return
-
-        if not self.cpdlc_session.is_logged_on():
-            self._message_box(
-                "You must be logged on to a station to send a request.",
-                "Not Logged On",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_logon("request a direct routing"):
             return
 
         dlg = DirectRequestDialog(self)
@@ -734,15 +716,9 @@ class MainWindow(wx.Frame):
 
     def on_speed_request(self, _):
         """Send a speed/Mach change request."""
-        if not self._require_connection("send a request"):
+        if not self._require_connection("request a speed change"):
             return
-
-        if not self.cpdlc_session.is_logged_on():
-            self._message_box(
-                "You must be logged on to a station to send a request.",
-                "Not Logged On",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_logon("request a speed change"):
             return
 
         dlg = SpeedRequestDialog(self)
@@ -761,15 +737,9 @@ class MainWindow(wx.Frame):
 
     def on_when_can_we_expect(self, _):
         """Send a when-can-we-expect inquiry."""
-        if not self._require_connection("send a request"):
+        if not self._require_connection("send a when-can-we-expect inquiry"):
             return
-
-        if not self.cpdlc_session.is_logged_on():
-            self._message_box(
-                "You must be logged on to a station to send a request.",
-                "Not Logged On",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_logon("send a when-can-we-expect inquiry"):
             return
 
         dlg = WhenCanWeDialog(self)
@@ -822,6 +792,25 @@ class MainWindow(wx.Frame):
         self._message_box(
             f"You must be connected to the CPDLC network to {action}.",
             "Not Connected",
+            wx.OK | wx.ICON_INFORMATION,
+        )
+        return False
+
+    def _require_logon(self, action):
+        """Check we are logged on to a station, telling the user if we are not.
+
+        Args:
+            action: What the user was trying to do, for the message text
+
+        Returns:
+            bool: True if logged on
+        """
+        if self.cpdlc_session.is_logged_on():
+            return True
+
+        self._message_box(
+            f"You must be logged on to a station to {action}.",
+            "Not Logged On",
             wx.OK | wx.ICON_INFORMATION,
         )
         return False

@@ -627,3 +627,28 @@ def test_stop_all_through_the_real_dialog_stops_and_announces_every_report(windo
         )
     finally:
         dlg.Destroy()
+
+
+# --- the logon gate ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "handler, action",
+    [
+        ("on_logoff", "log off"),
+        ("on_altitude_change", "request an altitude change"),
+        ("on_direct_request", "request a direct routing"),
+        ("on_speed_request", "request a speed change"),
+        ("on_when_can_we_expect", "send a when-can-we-expect inquiry"),
+    ],
+)
+def test_a_request_without_a_logon_is_refused_with_one_message(window, message_boxes, handler, action):
+    """Five handlers hand-rolled the same box with three different wordings."""
+    window.connection_manager = FakeConnectionManager()
+    window.cpdlc_session.connection_manager = window.connection_manager
+
+    getattr(window, handler)(None)
+
+    assert message_boxes.calls == [
+        (f"You must be logged on to a station to {action}.", "Not Logged On", wx.OK | wx.ICON_INFORMATION)
+    ]
