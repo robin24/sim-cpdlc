@@ -332,12 +332,15 @@ def test_listeners_hear_a_successful_check_and_a_dropped_subscription(logger, fr
 
 def test_a_listener_that_raises_is_dropped_and_the_others_still_run(logger, frame):
     """A dialog wx has already destroyed raises from its list; that must not
-    break the update cycle for the rest of the session."""
+    break the update cycle for the rest of the session. It is dropped after
+    the first raise, so it is not called again."""
     monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
     monitor._parent = frame
     heard = []
+    raised = []
 
     def broken():
+        raised.append("raised")
         raise RuntimeError("wrapped C++ object has been deleted")
 
     monitor.subscribe_to_changes(broken)
@@ -347,3 +350,4 @@ def test_a_listener_that_raises_is_dropped_and_the_others_still_run(logger, fram
     monitor.unsubscribe("EGLL", "vatatis")
 
     assert heard == [1, 0]
+    assert raised == ["raised"]
