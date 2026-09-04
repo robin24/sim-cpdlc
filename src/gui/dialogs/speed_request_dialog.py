@@ -25,17 +25,18 @@ class SpeedRequestDialog(wx.Dialog):
         type_label = wx.StaticText(self, label="Speed type:")
         vbox.Add(type_label, 0, wx.ALL, 5)
 
-        self.radio_mach = wx.RadioButton(self, label="Mach", style=wx.RB_GROUP)
-        self.radio_knots = wx.RadioButton(self, label="Knots")
+        self.radio_mach = wx.RadioButton(self, label="&Mach", style=wx.RB_GROUP)
+        self.radio_knots = wx.RadioButton(self, label="&Knots")
         self.radio_mach.SetValue(True)
 
         vbox.Add(self.radio_mach, 0, wx.LEFT | wx.RIGHT, 10)
         vbox.Add(self.radio_knots, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         # Speed value
-        speed_label = wx.StaticText(self, label="Speed value:")
+        speed_label = wx.StaticText(self, label="Speed &value:")
         vbox.Add(speed_label, 0, wx.ALL, 5)
         self.speed_text = wx.TextCtrl(self)
+        self.speed_text.SetName("Speed value")
         vbox.Add(self.speed_text, 0, wx.ALL | wx.EXPAND, 5)
 
         self.helper_text = wx.StaticText(
@@ -48,9 +49,9 @@ class SpeedRequestDialog(wx.Dialog):
         reason_label = wx.StaticText(self, label="Reason (optional):")
         vbox.Add(reason_label, 0, wx.ALL, 5)
 
-        self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
-        self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
+        self.reason_none = wx.RadioButton(self, label="&None", style=wx.RB_GROUP)
+        self.reason_weather = wx.RadioButton(self, label="Due to &weather")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft &performance")
 
         self.reason_none.SetValue(True)
 

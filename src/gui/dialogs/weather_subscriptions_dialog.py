@@ -36,7 +36,7 @@ class WeatherSubscriptionsDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        list_label = wx.StaticText(self, label="Reports being kept up to date:")
+        list_label = wx.StaticText(self, label="&Reports being kept up to date:")
         vbox.Add(list_label, 0, wx.ALL, 5)
 
         self.subscription_list = wx.ListBox(self, choices=[])

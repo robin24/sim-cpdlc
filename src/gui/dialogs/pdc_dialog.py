@@ -29,19 +29,22 @@ class PDCDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        origin_icao_label = wx.StaticText(self, label="Departure ICAO:")
+        origin_icao_label = wx.StaticText(self, label="&Departure ICAO:")
         vbox.Add(origin_icao_label, 0, wx.ALL, 5)
         self.origin_icao_text = wx.TextCtrl(self)
+        self.origin_icao_text.SetName("Departure ICAO")
         vbox.Add(self.origin_icao_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        destination_icao_label = wx.StaticText(self, label="Destination ICAO:")
+        destination_icao_label = wx.StaticText(self, label="Des&tination ICAO:")
         vbox.Add(destination_icao_label, 0, wx.ALL, 5)
         self.destination_icao_text = wx.TextCtrl(self)
+        self.destination_icao_text.SetName("Destination ICAO")
         vbox.Add(self.destination_icao_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        aircraft_label = wx.StaticText(self, label="Aircraft code:")
+        aircraft_label = wx.StaticText(self, label="Aircraft &code:")
         vbox.Add(aircraft_label, 0, wx.ALL, 5)
         self.aircraft_text = wx.TextCtrl(self)
+        self.aircraft_text.SetName("Aircraft code")
         vbox.Add(self.aircraft_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # The flight plan arrives after the dialog is open; this line says
@@ -49,14 +52,16 @@ class PDCDialog(wx.Dialog):
         self.simbrief_status = wx.StaticText(self, label="")
         vbox.Add(self.simbrief_status, 0, wx.ALL, 5)
 
-        stand_label = wx.StaticText(self, label="Stand number:")
+        stand_label = wx.StaticText(self, label="&Stand number:")
         vbox.Add(stand_label, 0, wx.ALL, 5)
         self.stand_text = wx.TextCtrl(self)
+        self.stand_text.SetName("Stand number")
         vbox.Add(self.stand_text, 0, wx.ALL | wx.EXPAND, 5)
 
-        atis_label = wx.StaticText(self, label="ATIS:")
+        atis_label = wx.StaticText(self, label="&ATIS:")
         vbox.Add(atis_label, 0, wx.ALL, 5)
         self.atis_text = wx.TextCtrl(self)
+        self.atis_text.SetName("ATIS")
         vbox.Add(self.atis_text, 0, wx.ALL | wx.EXPAND, 5)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)

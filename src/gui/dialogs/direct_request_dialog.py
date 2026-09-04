@@ -21,9 +21,10 @@ class DirectRequestDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        fix_label = wx.StaticText(self, label="Fix / Waypoint:")
+        fix_label = wx.StaticText(self, label="&Fix / Waypoint:")
         vbox.Add(fix_label, 0, wx.ALL, 5)
         self.fix_text = wx.TextCtrl(self)
+        self.fix_text.SetName("Fix / Waypoint")
         vbox.Add(self.fix_text, 0, wx.ALL | wx.EXPAND, 5)
 
         self.helper_text = wx.StaticText(
@@ -36,9 +37,9 @@ class DirectRequestDialog(wx.Dialog):
         reason_label = wx.StaticText(self, label="Reason (optional):")
         vbox.Add(reason_label, 0, wx.ALL, 5)
 
-        self.reason_none = wx.RadioButton(self, label="None", style=wx.RB_GROUP)
-        self.reason_weather = wx.RadioButton(self, label="Due to weather")
-        self.reason_performance = wx.RadioButton(self, label="Due to aircraft performance")
+        self.reason_none = wx.RadioButton(self, label="&None", style=wx.RB_GROUP)
+        self.reason_weather = wx.RadioButton(self, label="Due to &weather")
+        self.reason_performance = wx.RadioButton(self, label="Due to aircraft &performance")
 
         self.reason_none.SetValue(True)
 

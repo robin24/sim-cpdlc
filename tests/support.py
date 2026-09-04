@@ -16,6 +16,47 @@ from src.utils.update_checker import UpdateChecker
 CLIENT_CALLSIGN = "DLH123"
 
 
+def mnemonic(label):
+    """Return the access-key letter a wx label declares with '&', if any.
+
+    wx escapes a literal ampersand as "&&", which is not a mnemonic.
+
+    Args:
+        label: A wx item, menu or control label, e.g. "&Connect" or "Log&off\tCTRL+O".
+
+    Returns:
+        str: The upper-cased mnemonic letter, or None if the label declares
+            none.
+    """
+    index = 0
+    while index < len(label) - 1:
+        if label[index] == "&":
+            if label[index + 1] == "&":
+                index += 2
+                continue
+            return label[index + 1].upper()
+        index += 1
+    return None
+
+
+def colliding_mnemonics(labels):
+    """Group labels by mnemonic letter, keeping only letters more than one claims.
+
+    Args:
+        labels: Iterable of wx item, menu or control labels.
+
+    Returns:
+        dict: {letter: [label, ...]} for every letter two or more labels
+            declare as their mnemonic.
+    """
+    by_letter = {}
+    for label in labels:
+        letter = mnemonic(label)
+        if letter is not None:
+            by_letter.setdefault(letter, []).append(label)
+    return {letter: found for letter, found in by_letter.items() if len(found) > 1}
+
+
 def uplink(
     sender, min_value, text="CLIMB TO AND MAINTAIN FL360", rr=RR.WILCO_UNABLE, mrn=None
 ):

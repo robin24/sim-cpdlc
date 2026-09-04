@@ -38,7 +38,7 @@ class ConnectDialog(wx.Dialog):
         # Radio buttons for network selection
         self.network_radio_box = wx.RadioBox(
             self,
-            label="Network",
+            label="&Network",
             choices=["SayIntentions ACARS", "Hoppie ACARS"],
             majorDimension=1,
             style=wx.RA_SPECIFY_COLS,
@@ -49,9 +49,10 @@ class ConnectDialog(wx.Dialog):
         self.network_radio_box.Bind(wx.EVT_RADIOBOX, self.on_network_selection)
 
         # Callsign field
-        callsign_label = wx.StaticText(self, label="Callsign:")
+        callsign_label = wx.StaticText(self, label="&Callsign:")
         vbox.Add(callsign_label, 0, wx.ALL, 5)
         self.callsign_text = wx.TextCtrl(self)
+        self.callsign_text.SetName("Callsign")
 
         vbox.Add(self.callsign_text, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -61,9 +62,10 @@ class ConnectDialog(wx.Dialog):
         vbox.Add(self.simbrief_status, 0, wx.ALL, 5)
 
         # Logon code field - create controls but manage visibility later
-        self.logon_code_label = wx.StaticText(self, label="Logon code:")
+        self.logon_code_label = wx.StaticText(self, label="&Logon code:")
         vbox.Add(self.logon_code_label, 0, wx.ALL, 5)
         self.logon_code_text = wx.TextCtrl(self)
+        self.logon_code_text.SetName("Logon code")
         vbox.Add(self.logon_code_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Set initial logon code based on default selection (SayIntentions)

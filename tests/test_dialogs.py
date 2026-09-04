@@ -246,4 +246,4 @@ def test_the_network_choice_is_labelled_as_a_group(dialog):
     unrelated things to a screen reader."""
     connect = dialog(ConnectDialog, fetch_simbrief=RecordingFetch(configured=False))
 
-    assert connect.network_radio_box.GetLabel() == "Network"
+    assert connect.network_radio_box.GetLabel() == "&Network"

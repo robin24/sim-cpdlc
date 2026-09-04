@@ -21,7 +21,7 @@ from src.gui.dialogs import WeatherDialog, WeatherSubscriptionsDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
 from src.utils.weather_parsing import report_type_label
-from tests.support import FakeConnectionManager, FakeSimConnectManager
+from tests.support import FakeConnectionManager, FakeSimConnectManager, colliding_mnemonics
 
 # Which handler each menu item must fire. Every handler is replaced on the
 # class before the window is built, so the Bind() calls in _init_menu pick up
@@ -118,47 +118,6 @@ def test_the_requests_menu_carries_every_request(window):
     assert labels == list(MENU_BINDINGS["Requests"])
 
 
-def _mnemonic(label):
-    """Return the access-key letter a wx label declares with '&', if any.
-
-    wx escapes a literal ampersand as "&&", which is not a mnemonic.
-
-    Args:
-        label: A wx item or menu label, e.g. "&Connect" or "Log&off\tCTRL+O".
-
-    Returns:
-        str: The upper-cased mnemonic letter, or None if the label declares
-            none.
-    """
-    index = 0
-    while index < len(label) - 1:
-        if label[index] == "&":
-            if label[index + 1] == "&":
-                index += 2
-                continue
-            return label[index + 1].upper()
-        index += 1
-    return None
-
-
-def _colliding_mnemonics(labels):
-    """Group labels by mnemonic letter, keeping only letters more than one claims.
-
-    Args:
-        labels: Iterable of wx item or menu labels.
-
-    Returns:
-        dict: {letter: [label, ...]} for every letter two or more labels
-            declare as their mnemonic.
-    """
-    by_letter = {}
-    for label in labels:
-        letter = _mnemonic(label)
-        if letter is not None:
-            by_letter.setdefault(letter, []).append(label)
-    return {letter: found for letter, found in by_letter.items() if len(found) > 1}
-
-
 def test_no_mnemonic_collides_within_a_menu_or_the_menu_bar(window):
     """GetItemLabelText() strips '&', so it cannot see two items fighting over
     the same access key - one of them silently loses single-key keyboard
@@ -169,14 +128,14 @@ def test_no_mnemonic_collides_within_a_menu_or_the_menu_bar(window):
     for menu_index in range(menu_bar.GetMenuCount()):
         menu = menu_bar.GetMenu(menu_index)
         labels = [item.GetItemLabel() for item in menu.GetMenuItems()]
-        collisions = _colliding_mnemonics(labels)
+        collisions = colliding_mnemonics(labels)
         title = menu_bar.GetMenuLabel(menu_index)
         assert collisions == {}, f"{title!r} menu: colliding mnemonic(s) {collisions}"
 
     top_level_labels = [
         menu_bar.GetMenuLabel(index) for index in range(menu_bar.GetMenuCount())
     ]
-    collisions = _colliding_mnemonics(top_level_labels)
+    collisions = colliding_mnemonics(top_level_labels)
     assert collisions == {}, f"Menu bar: colliding mnemonic(s) {collisions}"
 
 

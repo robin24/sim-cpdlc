@@ -291,6 +291,22 @@ def test_a_request_with_a_value_applies_the_rule_for_its_type(dialog, index, typ
         assert when.get_message_text() == text
 
 
+def test_the_request_types_read_in_sentence_case_with_access_keys(dialog):
+    """The radios used to show the element text itself, shouted in capitals;
+    the text sent is unchanged (see the parametrized test above)."""
+    when = dialog(WhenCanWeDialog)
+
+    assert [radio.GetLabel() for radio in when.radios] == [
+        "&Higher level",
+        "&Lower level",
+        "&Back on route",
+        "&Climb to FL",
+        "&Descent to FL",
+        "&Mach",
+        "&Speed (knots)",
+    ]
+
+
 # --- telex --------------------------------------------------------------------
 
 
