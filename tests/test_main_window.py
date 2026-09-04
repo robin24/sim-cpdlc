@@ -455,3 +455,33 @@ def test_the_automatic_update_check_runs_in_a_packaged_build(build_window, monke
     window = build_window(auto_check_updates=True)
 
     assert checks == [window._on_auto_update_check]
+
+
+# --- settings -------------------------------------------------------------------
+
+
+class FakeSettingsDialog:
+    """Stands in for SettingsDialog: answers OK with auto-tune switched off."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def ShowModal(self):
+        return wx.ID_OK
+
+    def get_settings(self):
+        return ("", "", "", False, False, 5)
+
+    def Destroy(self):
+        pass
+
+
+def test_saving_settings_refreshes_the_auto_tune_cache(window, monkeypatch):
+    """The CONTACT path reads the cached flag rather than the config file on
+    every uplink, so Settings has to refresh it."""
+    monkeypatch.setattr(mw, "SettingsDialog", FakeSettingsDialog)
+    assert window._auto_tune_com1 is True
+
+    window.on_settings(None)
+
+    assert window._auto_tune_com1 is False

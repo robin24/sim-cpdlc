@@ -182,12 +182,43 @@ def test_auto_tune_can_be_switched_off(logger):
 
 
 def test_a_failed_auto_tune_tells_the_pilot_the_frequency(logger):
+    """One reconnect off the GUI thread, one more try; then the pilot is told."""
     window, _, _, simconnect = build(logger, simconnect=FakeSimConnectManager(result=False))
+
+    window._on_message_received(uplink(CURRENT, 7, CONTACT))
+    window.worker.run_pending()
+
+    assert simconnect.tuned == [133.325]
+    assert simconnect.connects == 1
+    assert window.status_texts == ["Auto-tune failed \u2014 set 133.325 manually"]
+
+
+def test_a_lost_simulator_is_reconnected_once_and_the_frequency_resent(logger):
+    """MSFS closed and reopened: the first send is refused, the reconnect
+    succeeds, the second send lands, and the pilot hears nothing."""
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window, _, _, _ = build(logger, simconnect=simconnect)
 
     window._on_message_received(uplink(CURRENT, 7, CONTACT))
 
     assert simconnect.tuned == [133.325]
-    assert window.status_texts == ["Auto-tune failed \u2014 set 133.325 manually"]
+    assert simconnect.disconnects == 1
+
+    window.worker.run_pending()
+
+    assert simconnect.tuned == [133.325, 133.325]
+    assert simconnect.connects == 1
+    assert window.status_texts == []
+
+
+def test_the_reconnect_does_not_run_on_the_gui_thread(logger):
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window, _, _, _ = build(logger, simconnect=simconnect)
+
+    window._on_message_received(uplink(CURRENT, 7, CONTACT))
+
+    assert simconnect.connects == 0
+    assert window.worker.pending() == 1
 
 
 def test_a_contact_from_another_station_is_not_tuned(logger):

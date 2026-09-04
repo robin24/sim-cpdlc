@@ -8,7 +8,7 @@ import wx
 
 from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR, HoppieError
 
-from src.config import DEFAULT_CONFIG, save_config
+from src.config import DEFAULT_CONFIG, load_config, save_config
 from src.model.connection_manager import PollResult
 from src.model.network_worker import NetworkWorker
 from src.utils.update_checker import UpdateChecker
@@ -182,20 +182,31 @@ class FakeSimConnectManager:
 
     Args:
         result: What connect() and set_com1_standby_mhz() report back
+        tune_results: Answers for successive set_com1_standby_mhz() calls,
+            consumed in order; `result` once they run out
     """
 
-    def __init__(self, result=True):
+    def __init__(self, result=True, tune_results=None):
         self.result = result
+        self.tune_results = list(tune_results or [])
         self.tuned = []
+        self.connects = 0
+        self.disconnects = 0
 
     def connect(self):
+        self.connects += 1
         return self.result
 
+    def is_connected(self):
+        return self.connects > self.disconnects
+
     def disconnect(self):
-        pass
+        self.disconnects += 1
 
     def set_com1_standby_mhz(self, frequency_mhz):
         self.tuned.append(frequency_mhz)
+        if self.tune_results:
+            return self.tune_results.pop(0)
         return self.result
 
 
@@ -390,6 +401,7 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window._callsign_clash_announced = False
     window._modal_depth = 0
     window.pending_update = None
+    window._auto_tune_com1 = load_config().get("auto_tune_com1", True)
     window.update_checker = UpdateChecker(logger, window.worker)
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a

@@ -71,41 +71,40 @@ class SimConnectManager:
                 self._event_id = None
                 logger.info("SimConnect disconnected")
 
+    def is_connected(self) -> bool:
+        """Whether a SimConnect session is open."""
+        return self._sm is not None
+
     def set_com1_standby_mhz(self, frequency_mhz: float) -> bool:
-        """Set COM1 standby frequency via SimConnect.
+        """Set COM1 standby over the existing connection.
+
+        Never connects: connect() is slow and can block, so the window runs
+        it off the GUI thread and retries the tune once afterwards.
 
         Args:
             frequency_mhz: Frequency in MHz (e.g. 134.750).
 
         Returns:
-            True if the frequency was set successfully, False otherwise.
+            True if the simulator took the frequency. False when not connected,
+            or when the event was refused (upstream send_event returns False
+            rather than raising when the simulator has gone); the connection
+            is dropped then, so the next attempt reconnects.
         """
+        if self._sm is None or self._event_id is None:
+            return False
+
         freq_hz = int(round(frequency_mhz * 1_000_000))
+        try:
+            accepted = self._sm.send_event(self._event_id, freq_hz)
+        except Exception as e:
+            logger.warning(f"Failed to send COM1 standby event: {e}")
+            self.disconnect()
+            return False
 
-        for attempt in range(2):
-            if not self.connect():
-                if attempt == 0:
-                    # Reset cached availability in case it was a transient import issue
-                    global _simconnect_available
-                    _simconnect_available = None
-                    logger.info("Retrying SimConnect connection...")
-                    continue
-                return False
+        if accepted is False:
+            logger.warning("SimConnect refused the COM1 standby event; dropping the connection")
+            self.disconnect()
+            return False
 
-            try:
-                self._sm.send_event(self._event_id, freq_hz)
-                logger.info(
-                    f"COM1 standby set to {frequency_mhz:.3f} MHz ({freq_hz} Hz)"
-                )
-                return True
-            except Exception as e:
-                logger.warning(f"Failed to send COM1 standby event: {e}")
-                # Reset connection so retry reconnects
-                self._sm = None
-                self._event_id = None
-                if attempt == 0:
-                    logger.info("Retrying after send_event failure...")
-                    continue
-                return False
-
-        return False
+        logger.info(f"COM1 standby set to {frequency_mhz:.3f} MHz ({freq_hz} Hz)")
+        return True

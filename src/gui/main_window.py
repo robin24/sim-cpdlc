@@ -115,6 +115,9 @@ class MainWindow(wx.Frame):
         # Check for updates if enabled in settings. A run from source is a
         # developer's checkout, not an installation to be told about releases.
         config = load_config()
+        # Read once and refreshed by Settings, rather than from disk on every
+        # uplink.
+        self._auto_tune_com1 = config.get("auto_tune_com1", True)
         if not config.get("auto_check_updates", True):
             self.logger.debug("Auto-update check disabled")
         elif not getattr(sys, "frozen", False):
@@ -320,6 +323,7 @@ class MainWindow(wx.Frame):
             config["weather_update_interval"] = new_weather_interval
             self.weather_monitor.set_interval(new_weather_interval * 60000)
             if save_config(config):
+                self._auto_tune_com1 = new_auto_tune_com1
                 self.logger.info("Settings saved successfully")
                 self._message_box(
                     "Settings saved successfully. The new settings will be used for future operations.",
@@ -416,6 +420,10 @@ class MainWindow(wx.Frame):
 
         # Add system message
         self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
+
+        # Reach the simulator now, off the GUI thread, so the first CONTACT
+        # does not pay for the connection.
+        self._connect_simconnect()
 
     def on_disconnect(self):
         """Disconnect from the CPDLC network."""
@@ -913,6 +921,18 @@ class MainWindow(wx.Frame):
         )
         return True
 
+    def _connect_simconnect(self, on_done=None):
+        """Connect to the simulator on a thread of its own.
+
+        SimConnect's connect can block without a timeout when the simulator is
+        slow to answer, so it must not sit in the network queue.
+
+        Args:
+            on_done: Callable(JobResult) run on the GUI thread; the result's
+                value is connect()'s answer
+        """
+        self.worker.run_detached("simconnect", self.simconnect_manager.connect, on_done)
+
     def _send_callback(self, what):
         """Build the on_done for a downlink: echo it and speed up polling, or
         say why it failed.
@@ -1389,8 +1409,7 @@ class MainWindow(wx.Frame):
         Args:
             text: The uplink's element text as returned by _protocol_text
         """
-        config = load_config()
-        if not config.get("auto_tune_com1", True):
+        if not self._auto_tune_com1:
             return
 
         freq = extract_contact_frequency(text)
@@ -1400,9 +1419,26 @@ class MainWindow(wx.Frame):
         self.logger.info(f"CONTACT/MONITOR frequency detected: {freq:.3f} MHz")
         if self.simconnect_manager.set_com1_standby_mhz(freq):
             self.logger.info(f"COM1 standby set to {freq:.3f} MHz")
-        else:
-            self.logger.warning("Could not set COM1 standby (SimConnect unavailable)")
-            self.SetStatusText(f"Auto-tune failed \u2014 set {freq:.3f} manually")
+            return
+
+        # Not connected, or the simulator has gone away since: reconnect once,
+        # off the GUI thread, and send the frequency again.
+        self.simconnect_manager.disconnect()
+        self._connect_simconnect(functools.partial(self._retry_auto_tune, freq))
+
+    def _retry_auto_tune(self, freq, result):
+        """Second and last attempt at a tune, after reconnecting. Runs on the GUI thread.
+
+        Args:
+            freq: The frequency in MHz
+            result: The reconnect's JobResult
+        """
+        if result.ok and result.value and self.simconnect_manager.set_com1_standby_mhz(freq):
+            self.logger.info(f"COM1 standby set to {freq:.3f} MHz after reconnecting")
+            return
+
+        self.logger.warning("Could not set COM1 standby (SimConnect unavailable)")
+        self.SetStatusText(f"Auto-tune failed \u2014 set {freq:.3f} manually")
 
     def _on_acknowledge_message(self, message_id: int, response: str):
         """Queue a response to an uplink.

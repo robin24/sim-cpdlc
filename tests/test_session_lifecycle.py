@@ -269,6 +269,7 @@ def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
     assert connection.connected_as is None
 
     window.worker.run_pending()
+    window.worker.run_pending()
 
     assert connection.connected_as == ("BAW123", "sayintentions")
     assert (session.get_callsign(), session.network) == ("BAW123", "sayintentions")
@@ -277,6 +278,7 @@ def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
     assert window.menu_item_connect.enabled is True
     assert window.status_texts[-1] == "Connected as BAW123."
     assert rows(manager) == [("SYSTEM", "Connected as BAW123")]
+    assert window.simconnect_manager.connects == 1
 
 
 def test_a_failed_connection_is_reported_and_the_menu_item_comes_back(logger, monkeypatch, message_boxes):
