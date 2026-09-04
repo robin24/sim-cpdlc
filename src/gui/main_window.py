@@ -118,6 +118,10 @@ class MainWindow(wx.Frame):
         # Read once and refreshed by Settings, rather than from disk on every
         # uplink.
         self._auto_tune_com1 = config.get("auto_tune_com1", True)
+        # One simulator reconnect at a time; a CONTACT that arrives while it
+        # is out only updates the frequency the retry will send.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
         if not config.get("auto_check_updates", True):
             self.logger.debug("Auto-update check disabled")
         elif not getattr(sys, "frozen", False):
@@ -1422,17 +1426,26 @@ class MainWindow(wx.Frame):
             return
 
         # Not connected, or the simulator has gone away since: reconnect once,
-        # off the GUI thread, and send the frequency again.
+        # off the GUI thread, and send the latest frequency again. A second
+        # CONTACT while the reconnect is out just replaces that frequency.
+        self._pending_tune = freq
+        if self._simconnect_reconnecting:
+            return
+        self._simconnect_reconnecting = True
         self.simconnect_manager.disconnect()
-        self._connect_simconnect(functools.partial(self._retry_auto_tune, freq))
+        self._connect_simconnect(self._retry_auto_tune)
 
-    def _retry_auto_tune(self, freq, result):
+    def _retry_auto_tune(self, result):
         """Second and last attempt at a tune, after reconnecting. Runs on the GUI thread.
 
         Args:
-            freq: The frequency in MHz
-            result: The reconnect's JobResult
+            result: The reconnect's JobResult; its value is connect()'s answer
         """
+        self._simconnect_reconnecting = False
+        freq, self._pending_tune = self._pending_tune, None
+        if freq is None:
+            return
+
         if result.ok and result.value and self.simconnect_manager.set_com1_standby_mhz(freq):
             self.logger.info(f"COM1 standby set to {freq:.3f} MHz after reconnecting")
             return

@@ -192,16 +192,19 @@ class FakeSimConnectManager:
         self.tuned = []
         self.connects = 0
         self.disconnects = 0
+        self.connected = False
 
     def connect(self):
         self.connects += 1
+        self.connected = self.result
         return self.result
 
     def is_connected(self):
-        return self.connects > self.disconnects
+        return self.connected
 
     def disconnect(self):
         self.disconnects += 1
+        self.connected = False
 
     def set_com1_standby_mhz(self, frequency_mhz):
         self.tuned.append(frequency_mhz)
@@ -402,6 +405,8 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window._modal_depth = 0
     window.pending_update = None
     window._auto_tune_com1 = load_config().get("auto_tune_com1", True)
+    window._simconnect_reconnecting = False
+    window._pending_tune = None
     window.update_checker = UpdateChecker(logger, window.worker)
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a

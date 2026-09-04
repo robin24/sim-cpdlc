@@ -221,6 +221,37 @@ def test_the_reconnect_does_not_run_on_the_gui_thread(logger):
     assert window.worker.pending() == 1
 
 
+def test_two_contacts_during_one_reconnect_share_it_and_the_latest_frequency_wins(logger):
+    """Two detached connects would race on the simulator handle; the second
+    CONTACT only replaces the frequency the one reconnect will send."""
+    simconnect = FakeSimConnectManager(tune_results=[False, False, True])
+    window, _, _, _ = build(logger, simconnect=simconnect)
+
+    window._on_message_received(uplink(CURRENT, 7, CONTACT))
+    window._on_message_received(uplink(CURRENT, 8, "CONTACT PARIS CONTROL ON @128.100@."))
+
+    assert window.worker.pending() == 1
+    assert simconnect.disconnects == 1
+
+    window.worker.run_pending()
+
+    assert simconnect.tuned == [133.325, 128.1, 128.1]
+    assert simconnect.connects == 1
+    assert window.status_texts == []
+    assert window._simconnect_reconnecting is False
+
+
+def test_a_reconnect_that_fails_reports_the_latest_frequency(logger):
+    simconnect = FakeSimConnectManager(result=False)
+    window, _, _, _ = build(logger, simconnect=simconnect)
+
+    window._on_message_received(uplink(CURRENT, 7, CONTACT))
+    window._on_message_received(uplink(CURRENT, 8, "CONTACT PARIS CONTROL ON @128.100@."))
+    window.worker.run_pending()
+
+    assert window.status_texts == ["Auto-tune failed — set 128.100 manually"]
+
+
 def test_a_contact_from_another_station_is_not_tuned(logger):
     window, _, _, simconnect = build(logger)
 
