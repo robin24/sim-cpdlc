@@ -33,7 +33,7 @@ VSVersionInfo(
         StringStruct(u'FileDescription', u'Sim-CPDLC Client'),
         StringStruct(u'FileVersion', u'2.1.2'),
         StringStruct(u'InternalName', u'Sim-CPDLC'),
-        StringStruct(u'LegalCopyright', u'Copyright (c) 2025 Robin Kipp'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Robin Kipp'),
         StringStruct(u'OriginalFilename', u'Sim-CPDLC.exe'),
         StringStruct(u'ProductName', u'Sim-CPDLC'),
         StringStruct(u'ProductVersion', u'2.1.2')])

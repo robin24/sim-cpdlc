@@ -15,6 +15,7 @@ def app_logger(monkeypatch, tmp_path):
     monkeypatch.setattr(logging_setup, "get_user_data_dir", lambda: str(tmp_path))
     logger = logging.getLogger("Sim-CPDLC")
     saved = list(logger.handlers)
+    saved_level = logger.level
     logger.handlers = []
     try:
         yield logger
@@ -22,6 +23,7 @@ def app_logger(monkeypatch, tmp_path):
         for handler in logger.handlers:
             handler.close()
         logger.handlers = saved
+        logger.setLevel(saved_level)
 
 
 def test_the_windowed_build_gets_no_console_handler(app_logger, monkeypatch):

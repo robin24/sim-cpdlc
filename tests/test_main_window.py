@@ -652,3 +652,15 @@ def test_a_request_without_a_logon_is_refused_with_one_message(window, message_b
     assert message_boxes.calls == [
         (f"You must be logged on to a station to {action}.", "Not Logged On", wx.OK | wx.ICON_INFORMATION)
     ]
+
+
+def test_logoff_is_refused_without_a_connection_before_the_logon_is_even_checked(window, message_boxes):
+    """on_logoff only checked _require_logon, unlike every other station
+    action, which checks _require_connection first too. A fresh window's real
+    connection manager is not connected, so this must stop at the connection
+    gate and never get as far as asking whether we are logged on."""
+    window.on_logoff(None)
+
+    assert message_boxes.calls == [
+        ("You must be connected to the CPDLC network to log off.", "Not Connected", wx.OK | wx.ICON_INFORMATION)
+    ]

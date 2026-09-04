@@ -42,7 +42,7 @@ Sim-CPDLC provides a user-friendly interface for Hoppie-compatible ACARS impleme
 
 3. Run the application:
    ```bash
-   python3 app.py
+   python app.py
    ```
 
 ## Usage Guide

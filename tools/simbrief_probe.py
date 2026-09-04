@@ -22,7 +22,6 @@ def main():
     Returns:
         int: 0 on success, 1 when SimBrief returned nothing, 2 without a user id
     """
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     user_id = os.environ.get("SIMBRIEF_USERID", "").strip()
     if not user_id:
         print("Set SIMBRIEF_USERID to your SimBrief user id first.", file=sys.stderr)
@@ -43,4 +42,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     sys.exit(main())

@@ -601,6 +601,8 @@ class MainWindow(wx.Frame):
 
     def on_logoff(self, _):
         """Initiate logoff from current CPDLC station."""
+        if not self._require_connection("log off"):
+            return
         if not self._require_logon("log off"):
             return
 

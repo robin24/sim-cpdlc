@@ -175,7 +175,7 @@ def extract_atis_letter(text):
     return ""
 
 
-def report_signature(text, info_type, icao=None):
+def report_signature(text, info_type):
     """Build the value used to decide whether a report has actually changed.
 
     ATIS reports are compared by information letter so that a re-worded but
@@ -189,7 +189,6 @@ def report_signature(text, info_type, icao=None):
     Args:
         text: The raw report text.
         info_type: The report type key (e.g. "metar", "vatatis").
-        icao: Optional airport ICAO code.
 
     Returns:
         str: An opaque signature string.

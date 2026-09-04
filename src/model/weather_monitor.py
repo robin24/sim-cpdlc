@@ -181,16 +181,12 @@ class WeatherMonitor:
             existing = self._subscriptions[subscription.key]
             if initial_text:
                 existing.text = initial_text
-                existing.signature = report_signature(
-                    initial_text, info_type, existing.icao
-                )
+                existing.signature = report_signature(initial_text, info_type)
             return False
 
         if initial_text:
             subscription.text = initial_text
-            subscription.signature = report_signature(
-                initial_text, info_type, subscription.icao
-            )
+            subscription.signature = report_signature(initial_text, info_type)
 
         self._subscriptions[subscription.key] = subscription
         self.logger.info(f"Subscribed to automatic updates: {subscription.describe()}")
@@ -402,7 +398,7 @@ class WeatherMonitor:
         subscription.last_update = time.time()
         self._notify_changed()
 
-        signature = report_signature(text, info_type, icao)
+        signature = report_signature(text, info_type)
         if signature == subscription.signature:
             self.logger.debug(f"No change in {subscription.describe()}")
             return

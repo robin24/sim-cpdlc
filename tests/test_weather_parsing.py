@@ -67,8 +67,8 @@ def test_a_datis_designator_is_not_mistaken_for_the_letter():
 
 
 def test_a_datis_that_advances_reads_as_a_change():
-    first = report_signature("KSFO D ATIS INFO Q 1156Z 28010KT", "vatatis", "KSFO")
-    second = report_signature("KSFO D ATIS INFO R 1256Z 28012KT", "vatatis", "KSFO")
+    first = report_signature("KSFO D ATIS INFO Q 1156Z 28010KT", "vatatis")
+    second = report_signature("KSFO D ATIS INFO R 1256Z 28012KT", "vatatis")
 
     assert (first, second) == ("INFO:Q", "INFO:R")
 
@@ -120,8 +120,8 @@ def test_an_atis_with_no_readable_letter_ignores_the_observation_time():
     """Falling back to the full text meant the Zulu time made every re-fetch
     look like a new broadcast, so the pilot was interrupted every cycle for a
     report that had not changed."""
-    first = report_signature(FRANKFURT_1150, "vatatis", "EDDF")
-    second = report_signature(FRANKFURT_1250, "vatatis", "EDDF")
+    first = report_signature(FRANKFURT_1150, "vatatis")
+    second = report_signature(FRANKFURT_1250, "vatatis")
 
     assert first == second
 
@@ -129,8 +129,8 @@ def test_an_atis_with_no_readable_letter_ignores_the_observation_time():
 def test_an_atis_with_no_letter_still_notices_a_real_change():
     changed = "FRANKFURT ARRIVAL 1250Z RWY 07R ADVISE YOU HAVE SIERRA"
 
-    assert report_signature(FRANKFURT_1150, "vatatis", "EDDF") != (
-        report_signature(changed, "vatatis", "EDDF")
+    assert report_signature(FRANKFURT_1150, "vatatis") != (
+        report_signature(changed, "vatatis")
     )
 
 

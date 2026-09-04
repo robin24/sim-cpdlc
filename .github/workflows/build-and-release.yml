@@ -58,8 +58,10 @@ jobs:
 
       - name: Check that the code carries the tagged version
         shell: bash
+        env:
+          TAG_VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          python - "${{ steps.get_version.outputs.version }}" <<'EOF'
+          python - "$TAG_VERSION" <<'EOF'
           import re, sys
           tag = sys.argv[1]
           source = open("src/config.py", encoding="utf-8").read()
