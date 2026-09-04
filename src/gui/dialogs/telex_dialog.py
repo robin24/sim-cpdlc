@@ -42,8 +42,15 @@ class TelexDialog(wx.Dialog):
         self.message_text = wx.TextCtrl(self, style=wx.TE_MULTILINE, size=(-1, 100))
         vbox.Add(self.message_text, 1, wx.ALL | wx.EXPAND, 5)
 
-        # Read by screen readers on request; says why OK is disabled.
-        self.counter_text = wx.StaticText(self, label="")
+        # Read by screen readers on request; says why OK is disabled. Created
+        # with the longest label this dialog ever shows so Fit() below sizes
+        # the dialog to hold it; on_text_change(None) at the end of __init__
+        # resets the text to the real (much shorter) starting count.
+        self.counter_text = wx.StaticText(
+            self,
+            label=f"{TELEX_MAX_CHARACTERS} / {TELEX_MAX_CHARACTERS} characters. "
+            "Only plain ASCII text can be sent.",
+        )
         vbox.Add(self.counter_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         hbox = wx.BoxSizer(wx.HORIZONTAL)

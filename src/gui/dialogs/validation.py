@@ -29,3 +29,14 @@ def matches(rule, text):
 def pad_three(text):
     """Zero-pad a validated number to three digits (50 -> 050)."""
     return text.zfill(3)
+
+
+# Flight levels the request dialogs accept: below FL010 nobody uses CPDLC,
+# above FL600 nothing the networks serve flies.
+MIN_FLIGHT_LEVEL = 10
+MAX_FLIGHT_LEVEL = 600
+
+
+def is_flight_level(text):
+    """True for two or three ASCII digits naming a level from FL010 to FL600."""
+    return matches(FLIGHT_LEVEL, text) and MIN_FLIGHT_LEVEL <= int(text) <= MAX_FLIGHT_LEVEL

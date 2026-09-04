@@ -8,7 +8,7 @@ from src.model.cpdlc_elements import (
     REASON_AIRCRAFT_PERFORMANCE,
     REASON_WEATHER,
 )
-from src.gui.dialogs.validation import FLIGHT_LEVEL, matches, pad_three
+from src.gui.dialogs.validation import is_flight_level, pad_three
 
 
 class AltitudeChangeDialog(wx.Dialog):
@@ -35,11 +35,12 @@ class AltitudeChangeDialog(wx.Dialog):
         vbox.Add(self.altitude_text, 0, wx.ALL | wx.EXPAND, 5)
 
         # Add a helper text for altitude format
-        helper_text = wx.StaticText(
-            self, label="Enter flight level without 'FL' prefix (e.g., 350 for FL350)"
+        self.helper_text = wx.StaticText(
+            self,
+            label="Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350 for FL350)",
         )
-        helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
-        vbox.Add(helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
+        vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons
         reason_label = wx.StaticText(self, label="Reason (optional):")
@@ -75,8 +76,8 @@ class AltitudeChangeDialog(wx.Dialog):
         return self.altitude_text.GetValue().strip()
 
     def on_text_change(self, _):
-        """Enable OK only for two or three ASCII digits."""
-        self.ok_button.Enable(matches(FLIGHT_LEVEL, self._level()))
+        """Enable OK only for two or three ASCII digits from FL010 to FL600."""
+        self.ok_button.Enable(is_flight_level(self._level()))
 
     def get_altitude_details(self):
         """

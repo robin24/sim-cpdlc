@@ -17,6 +17,7 @@ from src.gui.dialogs import (
     TelexDialog,
     WhenCanWeDialog,
 )
+from src.gui.dialogs.telex_dialog import TELEX_MAX_CHARACTERS
 from src.model.cpdlc_elements import REASON_WEATHER
 
 # Passes str.isdigit() and int(), but is not ASCII and the network rejects it.
@@ -76,11 +77,17 @@ def test_logon_returns_the_station_stripped_and_upper_cased(dialog):
         ("350", True),
         ("50", True),
         (" 350 ", True),
+        ("10", True),
+        ("600", True),
         ("5", False),
         ("3500", False),
         ("+350", False),
         ("3_50", False),
         ("35.0", False),
+        ("05", False),
+        ("00", False),
+        ("999", False),
+        ("601", False),
         (ARABIC_INDIC_350, False),
         ("", False),
     ],
@@ -109,6 +116,14 @@ def test_altitude_carries_the_chosen_reason(dialog):
     select(altitude.reason_weather)
 
     assert altitude.get_altitude_details() == ("FL350", REASON_WEATHER)
+
+
+def test_altitude_helper_text_names_the_rule(dialog):
+    altitude = dialog(AltitudeChangeDialog)
+
+    assert altitude.helper_text.GetLabel() == (
+        "Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350 for FL350)"
+    )
 
 
 # --- direct to ----------------------------------------------------------------
@@ -254,9 +269,12 @@ def test_choosing_a_type_with_a_value_shows_the_field_and_waits_for_it(dialog):
         (3, " 350 ", True, "WHEN CAN WE EXPECT CLIMB TO FL350"),
         (3, "5", False, None),
         (3, "+350", False, None),
+        (3, "999", False, None),
         (4, "100", True, "WHEN CAN WE EXPECT DESCENT TO FL100"),
+        (4, "10", True, "WHEN CAN WE EXPECT DESCENT TO FL010"),
         (4, ARABIC_INDIC_350, False, None),
         (5, "82", True, "WHEN CAN WE EXPECT M082"),
+        (5, "05", True, "WHEN CAN WE EXPECT M005"),
         (5, "0820", False, None),
         (6, "300", True, "WHEN CAN WE EXPECT 300K"),
         (6, "30", False, None),
@@ -281,6 +299,20 @@ def telex(dialog, frame):
     """A Telex dialog whose parent window claims to be logged on to EDDF."""
     frame.get_current_station = lambda: "EDDF"
     return dialog(TelexDialog)
+
+
+def test_the_dialog_is_wide_enough_for_the_longest_counter_label(telex):
+    """counter_text used to be created with an empty label and the dialog
+    Fit() to that, so the longer messages below overflowed it."""
+    longest = (
+        f"{TELEX_MAX_CHARACTERS} / {TELEX_MAX_CHARACTERS} characters. "
+        "Only plain ASCII text can be sent."
+    )
+
+    assert telex.GetClientSize().width >= (
+        telex.counter_text.GetTextExtent(longest).width + 10
+    )
+    assert telex.counter_text.GetLabel() == "0 / 220 characters"
 
 
 def test_the_recipient_starts_as_the_current_station(telex):

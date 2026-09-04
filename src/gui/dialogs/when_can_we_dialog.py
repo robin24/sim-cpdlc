@@ -4,7 +4,14 @@ When-can-we-expect dialog for the Sim-CPDLC application.
 
 import wx
 
-from src.gui.dialogs.validation import FLIGHT_LEVEL, KNOTS, MACH, matches, pad_three
+from src.gui.dialogs.validation import (
+    FLIGHT_LEVEL,
+    KNOTS,
+    MACH,
+    is_flight_level,
+    matches,
+    pad_three,
+)
 
 
 class WhenCanWeDialog(wx.Dialog):
@@ -87,7 +94,9 @@ class WhenCanWeDialog(wx.Dialog):
             self.helper_text.Show()
 
             if "FL" in label:
-                self.helper_text.SetLabel("Enter flight level, 2 or 3 digits (e.g. 350)")
+                self.helper_text.SetLabel(
+                    "Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350)"
+                )
             elif label == "Mach":
                 self.helper_text.SetLabel("Enter Mach without decimal (e.g. 082)")
             else:
@@ -108,13 +117,22 @@ class WhenCanWeDialog(wx.Dialog):
 
     def _on_value_change(self, _):
         """Enable OK when the value fits the selected type's rule."""
-        _, rule = self.MESSAGE_TYPES[self._get_selected_index()]
+        label, rule = self.MESSAGE_TYPES[self._get_selected_index()]
 
         if rule is None:
             self.ok_button.Enable()
             return
 
-        self.ok_button.Enable(matches(rule, self._value()))
+        # FLIGHT_LEVEL and MACH are both r"\d{2,3}": CPython folds equal
+        # string literals in the same module into one object, so "rule is
+        # FLIGHT_LEVEL" would also be true for the Mach rule. Dispatch on the
+        # label instead, as _on_type_change and get_message_text already do.
+        value = self._value()
+        if "FL" in label:
+            ok = is_flight_level(value)
+        else:
+            ok = matches(rule, value)
+        self.ok_button.Enable(ok)
 
     def get_message_text(self):
         """Build the full WHEN CAN WE EXPECT message text.
