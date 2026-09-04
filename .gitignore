@@ -4,3 +4,5 @@ __pycache__
 config.json
 build/
 dist/
+installer/
+.pytest_cache/

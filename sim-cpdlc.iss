@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "Sim-CPDLC"
-#define MyAppVersion "0.3.1"
+#define MyAppVersion "2.1.2"
 #define MyAppPublisher "Robin Kipp"
 #define MyAppURL "https://github.com/robin24/sim-cpdlc"
 #define MyAppExeName "Sim-CPDLC.exe"

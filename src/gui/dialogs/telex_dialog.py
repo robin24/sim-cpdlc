@@ -19,13 +19,14 @@ class TelexDialog(wx.Dialog):
     Dialog for sending a telex message.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, recipient):
         """
         Initialize the telex dialog.
 
         Args:
-            parent: The parent window; its get_current_station() fills the
-                recipient in
+            parent: The parent window
+            recipient: The station to address by default; the current
+                station, or "" when not logged on
         """
         wx.Dialog.__init__(self, parent, wx.ID_ANY, "Telex", size=(-1, -1))
 
@@ -34,7 +35,7 @@ class TelexDialog(wx.Dialog):
         recipient_label = wx.StaticText(self, label="To:")
         vbox.Add(recipient_label, 0, wx.ALL, 5)
         self.recipient_text = wx.TextCtrl(self)
-        self.recipient_text.SetValue(parent.get_current_station())
+        self.recipient_text.SetValue(recipient)
         vbox.Add(self.recipient_text, 0, wx.ALL | wx.EXPAND, 5)
 
         message_label = wx.StaticText(self, label="Message:")

@@ -239,3 +239,11 @@ def test_pdc_details_are_returned_stripped(dialog):
     pdc.atis_text.SetValue(" k ")
 
     assert pdc.get_pdc_details() == ("EDDF", "EGLL", "A320", "A12", "K")
+
+
+def test_the_network_choice_is_labelled_as_a_group(dialog):
+    """A RadioBox with an empty label and a StaticText beside it reads as two
+    unrelated things to a screen reader."""
+    connect = dialog(ConnectDialog, fetch_simbrief=RecordingFetch(configured=False))
+
+    assert connect.network_radio_box.GetLabel() == "Network"

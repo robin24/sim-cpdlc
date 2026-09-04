@@ -295,10 +295,9 @@ def test_a_request_with_a_value_applies_the_rule_for_its_type(dialog, index, typ
 
 
 @pytest.fixture
-def telex(dialog, frame):
-    """A Telex dialog whose parent window claims to be logged on to EDDF."""
-    frame.get_current_station = lambda: "EDDF"
-    return dialog(TelexDialog)
+def telex(dialog):
+    """A Telex dialog opened while logged on to EDDF."""
+    return dialog(TelexDialog, "EDDF")
 
 
 def test_the_dialog_is_wide_enough_for_the_longest_counter_label(telex):
@@ -377,3 +376,17 @@ def test_the_telex_is_returned_stripped_and_upper_cased(telex):
     telex.message_text.SetValue("  request oceanic clearance \n")
 
     assert telex.get_telex_details() == ("EDDF", "REQUEST OCEANIC CLEARANCE")
+
+
+# --- helper texts ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [AltitudeChangeDialog, DirectRequestDialog, SpeedRequestDialog, WhenCanWeDialog],
+    ids=["altitude", "direct", "speed", "when-can-we"],
+)
+def test_helper_text_uses_the_system_grey_so_high_contrast_themes_apply(dialog, factory):
+    built = dialog(factory)
+
+    assert built.helper_text.GetForegroundColour() == wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT)

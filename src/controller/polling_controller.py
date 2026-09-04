@@ -37,14 +37,14 @@ class PollingController:
         logger,
         connection_manager: ConnectionManager,
         message_callback=None,
-        default_poll_interval=60000,  # 60 seconds
         active_poll_interval=20000,  # 20 seconds
         inactivity_timeout=300000,  # 5 minutes
         poll_interval_range=None,
         link_callback=None,
         unreadable_callback=None,
         tick_callback=None,
-        worker=None,
+        *,
+        worker,
     ):
         """Initialize the polling controller.
 
@@ -52,8 +52,6 @@ class PollingController:
             logger: Application logger
             connection_manager: Connection manager instance
             message_callback: Callback for received messages
-            default_poll_interval: Accepted for call-site compatibility; the
-                idle interval always comes from poll_interval_range
             active_poll_interval: Interval used while a reply is expected
             inactivity_timeout: How long to stay in the faster mode after the
                 last activity, in milliseconds
@@ -66,7 +64,7 @@ class PollingController:
             tick_callback: Callback() run at the end of every tick, whatever
                 the poll returned, for housekeeping that keeps the poll's
                 rhythm, such as giving up on an unanswered logon
-            worker: The NetworkWorker that runs the polls
+            worker: The NetworkWorker that runs the polls (required)
         """
         self.logger = logger
         self.connection_manager = connection_manager
@@ -78,7 +76,6 @@ class PollingController:
         # True from submitting a poll until its result arrives, so a slow
         # server never has two polls stacked behind it.
         self._poll_in_flight = False
-        self.default_poll_interval = default_poll_interval
         self.active_poll_interval = active_poll_interval
         self.inactivity_timeout = inactivity_timeout
         self.poll_interval_range = poll_interval_range or (

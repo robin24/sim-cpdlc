@@ -52,30 +52,30 @@ def test_the_plain_atis_is_labelled_without_a_network():
 
 
 def test_the_letter_is_read_from_the_information_marker():
-    assert extract_atis_letter("EGLL ATIS INFORMATION K RWY 27R", "EGLL") == "K"
+    assert extract_atis_letter("EGLL ATIS INFORMATION K RWY 27R") == "K"
 
 
 def test_a_spelled_out_letter_is_understood():
-    assert extract_atis_letter("EGLL ATIS INFO KILO RWY 27R", "EGLL") == "K"
+    assert extract_atis_letter("EGLL ATIS INFO KILO RWY 27R") == "K"
 
 
 def test_a_datis_designator_is_not_mistaken_for_the_letter():
     """A US D-ATIS names itself "KSFO D ATIS" before giving the letter. Reading
     the D as the letter pins the signature to a value that never changes, so
     the report would silently stop announcing for the rest of the flight."""
-    assert extract_atis_letter("KSFO D ATIS INFO Q 1156Z 28010KT", "KSFO") == "Q"
+    assert extract_atis_letter("KSFO D ATIS INFO Q 1156Z 28010KT") == "Q"
 
 
 def test_a_datis_that_advances_reads_as_a_change():
-    first = report_signature("KSFO D ATIS INFO Q 1156Z 28010KT", "vatatis", "KSFO")
-    second = report_signature("KSFO D ATIS INFO R 1256Z 28012KT", "vatatis", "KSFO")
+    first = report_signature("KSFO D ATIS INFO Q 1156Z 28010KT", "vatatis")
+    second = report_signature("KSFO D ATIS INFO R 1256Z 28012KT", "vatatis")
 
     assert (first, second) == ("INFO:Q", "INFO:R")
 
 
 def test_an_unreadable_letter_falls_back_to_the_whole_report():
     """Better to compare the full text than to guess at a letter."""
-    assert extract_atis_letter("FRANKFURT ARRIVAL RWY 25L", "EDDF") == ""
+    assert extract_atis_letter("FRANKFURT ARRIVAL RWY 25L") == ""
 
 
 # --- report formatting ---------------------------------------------------------
@@ -120,8 +120,8 @@ def test_an_atis_with_no_readable_letter_ignores_the_observation_time():
     """Falling back to the full text meant the Zulu time made every re-fetch
     look like a new broadcast, so the pilot was interrupted every cycle for a
     report that had not changed."""
-    first = report_signature(FRANKFURT_1150, "vatatis", "EDDF")
-    second = report_signature(FRANKFURT_1250, "vatatis", "EDDF")
+    first = report_signature(FRANKFURT_1150, "vatatis")
+    second = report_signature(FRANKFURT_1250, "vatatis")
 
     assert first == second
 
@@ -129,8 +129,8 @@ def test_an_atis_with_no_readable_letter_ignores_the_observation_time():
 def test_an_atis_with_no_letter_still_notices_a_real_change():
     changed = "FRANKFURT ARRIVAL 1250Z RWY 07R ADVISE YOU HAVE SIERRA"
 
-    assert report_signature(FRANKFURT_1150, "vatatis", "EDDF") != (
-        report_signature(changed, "vatatis", "EDDF")
+    assert report_signature(FRANKFURT_1150, "vatatis") != (
+        report_signature(changed, "vatatis")
     )
 
 

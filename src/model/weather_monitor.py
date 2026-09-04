@@ -68,7 +68,8 @@ class WeatherMonitor:
         on_update=None,
         on_error=None,
         interval_ms=300000,
-        worker=None,
+        *,
+        worker,
     ):
         """Initialize the weather monitor.
 
@@ -78,7 +79,7 @@ class WeatherMonitor:
             on_update: Callback(subscription, text, description) for new reports
             on_error: Callback(subscription, error_text) for repeated failures
             interval_ms: How often to re-check each subscription
-            worker: The NetworkWorker that performs the requests
+            worker: The NetworkWorker that performs the requests (required)
         """
         self.logger = logger
         self.connection_manager = connection_manager
@@ -180,16 +181,12 @@ class WeatherMonitor:
             existing = self._subscriptions[subscription.key]
             if initial_text:
                 existing.text = initial_text
-                existing.signature = report_signature(
-                    initial_text, info_type, existing.icao
-                )
+                existing.signature = report_signature(initial_text, info_type)
             return False
 
         if initial_text:
             subscription.text = initial_text
-            subscription.signature = report_signature(
-                initial_text, info_type, subscription.icao
-            )
+            subscription.signature = report_signature(initial_text, info_type)
 
         self._subscriptions[subscription.key] = subscription
         self.logger.info(f"Subscribed to automatic updates: {subscription.describe()}")
@@ -401,7 +398,7 @@ class WeatherMonitor:
         subscription.last_update = time.time()
         self._notify_changed()
 
-        signature = report_signature(text, info_type, icao)
+        signature = report_signature(text, info_type)
         if signature == subscription.signature:
             self.logger.debug(f"No change in {subscription.describe()}")
             return

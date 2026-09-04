@@ -5,6 +5,7 @@ the previous one, because the dialog was shown synchronously from the failing
 handler and timers keep firing under a modal loop.
 """
 
+import logging
 import sys
 import threading
 
@@ -62,3 +63,18 @@ def test_install_routes_both_hooks_to_the_reporter(logger, monkeypatch):
 
     assert sys.excepthook == reporter.handle_uncaught
     assert threading.excepthook == reporter.handle_thread
+
+
+def test_the_report_redacts_a_logon_code(caplog):
+    """The reporter prints the whole traceback, which is where a logon code
+    from a requests URL would survive every other redaction."""
+    log = logging.getLogger("reporter-under-test")
+    reporter = ExceptionReporter(log)
+    error = RuntimeError("GET https://www.hoppie.nl/acars/system/connect.html?logon=SECRET42&from=DLH123")
+
+    with caplog.at_level(logging.ERROR, logger=log.name):
+        reporter.report(RuntimeError, error, None, "test")
+
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "logon=<redacted>" in joined
+    assert "SECRET42" not in joined

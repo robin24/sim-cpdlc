@@ -143,7 +143,14 @@ class NetworkWorker:
         stuck in the queue it would stall every send and poll, stuck on its
         own thread it costs nothing. The result comes back the same way.
         Without a worker thread (tests) the job is queued like any other.
+
+        Raises:
+            ValueError: For a kind that is paced (send, inforeq); pacing
+                only works inside the queue.
         """
+        if kind in self._spacing:
+            raise ValueError(f"{kind} jobs are paced; queue them with submit()")
+
         if self._thread is None:
             return self.submit(kind, fn, on_done, PRIORITY_INFO)
 

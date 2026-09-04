@@ -2,6 +2,7 @@
 
 import os
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from src.config import get_user_data_dir
 
@@ -21,10 +22,12 @@ def setup_logging():
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_formatter)
-    logger.addHandler(console_handler)
+    # Console handler, only where there is a console: the packaged build runs
+    # with console=False, which leaves sys.stderr as None.
+    if sys.stderr is not None:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(log_formatter)
+        logger.addHandler(console_handler)
 
     # File handler with rotation (10MB max size, keep 5 backup files)
     try:

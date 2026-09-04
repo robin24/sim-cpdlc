@@ -156,12 +156,11 @@ class ConnectionManager:
     is down, so info_failures gates nothing.
     """
 
-    def __init__(self, logger, message_callback=None):
+    def __init__(self, logger):
         """Initialize the connection manager.
 
         Args:
             logger: Application logger
-            message_callback: Callback function for received messages
         """
         self.logger = logger
         self.cnx = None
@@ -177,7 +176,6 @@ class ConnectionManager:
         # and gate nothing.
         self.info_failures = 0
         self.max_connection_failures = MAX_CONNECTION_FAILURES
-        self.message_callback = message_callback
 
     def _call(self, operation, is_send=False, is_info=False):
         """Run a hoppie_connector call, normalising its failure modes.
@@ -198,13 +196,15 @@ class ConnectionManager:
         try:
             result = operation()
         except TRANSPORT_ERRORS as exc:
-            raise self._transport_failure(exc, is_send, is_info) from exc
+            # from None: the requests exception carries the request URL, logon
+            # code included, and traceback formatting prints __cause__ in full.
+            raise self._transport_failure(exc, is_send, is_info) from None
         except PROTOCOL_ERRORS as exc:
             # Not a link problem: a too-long telex or a bad callsign fails here
             # and must not push the client towards a reconnection.
             error = HoppieError(redact(exc))
             error.is_transport = False
-            raise error from exc
+            raise error from None
 
         if is_send:
             self.send_failures = 0
@@ -475,7 +475,7 @@ class ConnectionManager:
             response = self._call(_fetch, is_info=True)
         except HoppieError as exc:
             self.logger.error(f"{label} request failed: {exc}")
-            raise HoppieError(f"{label} request failed: {exc}") from exc
+            raise HoppieError(f"{label} request failed: {exc}") from None
 
         body = response.text.strip()
 

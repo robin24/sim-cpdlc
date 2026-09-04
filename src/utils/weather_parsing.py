@@ -113,9 +113,9 @@ def format_report_text(text):
 
     Hoppie separates the lines of an information report with "@", which a
     screen reader announces as the word "at" if it is left in place. This is
-    deliberately not message_formatting.format_message_text: that helper maps
-    "@@" to the literal string "N/A" and strips underscores, which are CPDLC
-    packet conventions and would corrupt a weather report.
+    deliberately not message_formatting.format_message_text: that helper
+    treats "@" as the field separator of a CPDLC element and strips
+    underscores, conventions that would corrupt a weather report.
 
     Args:
         text: The raw report text.
@@ -138,7 +138,7 @@ def format_report_line(text):
     return " ".join(" ".join(_report_lines(text)).split())
 
 
-def extract_atis_letter(text, icao=None):
+def extract_atis_letter(text):
     """Pull the information letter out of an ATIS report.
 
     Handles both "INFORMATION K" and "INFORMATION KILO". The airport code is
@@ -150,7 +150,6 @@ def extract_atis_letter(text, icao=None):
 
     Args:
         text: The raw ATIS text.
-        icao: Accepted for call-site compatibility and ignored.
 
     Returns:
         str: A single uppercase letter, or "" if none could be identified.
@@ -176,7 +175,7 @@ def extract_atis_letter(text, icao=None):
     return ""
 
 
-def report_signature(text, info_type, icao=None):
+def report_signature(text, info_type):
     """Build the value used to decide whether a report has actually changed.
 
     ATIS reports are compared by information letter so that a re-worded but
@@ -190,13 +189,12 @@ def report_signature(text, info_type, icao=None):
     Args:
         text: The raw report text.
         info_type: The report type key (e.g. "metar", "vatatis").
-        icao: Optional airport ICAO code.
 
     Returns:
         str: An opaque signature string.
     """
     if is_atis_type(info_type):
-        letter = extract_atis_letter(text, icao)
+        letter = extract_atis_letter(text)
         if letter:
             return f"INFO:{letter}"
         # No letter to compare, so fall back to the text -- but drop the time
@@ -223,7 +221,7 @@ def describe_report(text, info_type, icao=None):
     station = f" {icao.upper()}" if icao else ""
 
     if is_atis_type(info_type):
-        letter = extract_atis_letter(text, icao)
+        letter = extract_atis_letter(text)
         if letter:
             return f"{label}{station} information {letter}"
 

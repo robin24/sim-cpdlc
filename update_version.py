@@ -3,9 +3,11 @@
 Version Updater Script
 
 This script updates all version numbers in the version_info.txt file and sim-cpdlc.iss file.
+It also refreshes the LegalCopyright year in version_info.txt to the current year.
 It can be used manually or as part of a GitHub Actions workflow.
 """
 
+import datetime
 import re
 import sys
 import argparse
@@ -42,7 +44,8 @@ def format_version_string(version_tuple):
 
 def update_version_info(file_path, new_version):
     """
-    Update all version numbers in the version_info.txt file.
+    Update all version numbers in the version_info.txt file and refresh its
+    LegalCopyright year to the current year.
 
     Args:
         file_path: Path to the version_info.txt file
@@ -81,6 +84,15 @@ def update_version_info(file_path, new_version):
         content = re.sub(
             r"StringStruct\(u\'ProductVersion\',\s*u\'[\d\.]+\'\)",
             f"StringStruct(u'ProductVersion', u'{version_string}')",
+            content,
+        )
+
+        # Refresh the copyright year so the executable's properties don't
+        # keep saying whatever year version_info.txt was first written in.
+        current_year = datetime.date.today().year
+        content = re.sub(
+            r"(StringStruct\(u'LegalCopyright', u'Copyright \(c\) )\d{4}",
+            rf"\g<1>{current_year}",
             content,
         )
 
@@ -166,7 +178,10 @@ def update_config_version(file_path, new_version):
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
-        description="Update version numbers in version_info.txt, sim-cpdlc.iss, and config.py"
+        description=(
+            "Update version numbers in version_info.txt, sim-cpdlc.iss, and "
+            "config.py, and refresh the copyright year in version_info.txt"
+        )
     )
     parser.add_argument("version", help="New version number (e.g., 1.2.3)")
     parser.add_argument(

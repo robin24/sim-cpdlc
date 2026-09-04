@@ -12,7 +12,7 @@ APP_AUTHOR = "Sim-CPDLC"
 GITHUB_URL = "https://github.com/robin24/sim-cpdlc"
 
 # Application version - this will be updated by update_version.py
-APP_VERSION = "0.1.0"
+APP_VERSION = "2.1.2"
 
 
 # Get user data directory
@@ -24,8 +24,15 @@ def get_user_data_dir():
     return data_dir
 
 
-# Configuration file path
-CONFIG_FILE = os.path.join(get_user_data_dir(), "config.json")
+# Configuration file path. The directory is created when something is written
+# there (save_config, the log file), not when this module is imported.
+CONFIG_FILE = os.path.join(appdirs.user_data_dir(APP_NAME, APP_AUTHOR), "config.json")
+
+
+def config_file_exists():
+    """Whether a configuration file has been written yet (False on first launch)."""
+    return os.path.exists(CONFIG_FILE)
+
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -49,7 +56,7 @@ def load_config():
     try:
         with open(CONFIG_FILE, "r") as f:
             config = json.load(f)
-            logger.debug(f"Loaded config: {config}")
+            logger.debug(f"Loaded config with keys: {sorted(config)}")
 
             # Validate required fields exist, add any missing ones
             for key, default_value in DEFAULT_CONFIG.items():
@@ -77,12 +84,13 @@ def save_config(config):
 
     try:
         config_dir = os.path.dirname(CONFIG_FILE)
+        os.makedirs(config_dir, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(config, f, indent=2)
             os.replace(tmp_path, CONFIG_FILE)
-            logger.debug(f"Saved config: {config}")
+            logger.debug(f"Saved config with keys: {sorted(config)}")
         except BaseException:
             os.unlink(tmp_path)
             raise
@@ -104,7 +112,6 @@ HOPPIE_API_URL = "https://www.hoppie.nl/acars/system/connect.html"
 # while a reply is expected. Each idle poll is randomised within this band.
 MIN_POLL_INTERVAL = 45000  # 45 seconds
 MAX_POLL_INTERVAL = 75000  # 75 seconds
-DEFAULT_POLL_INTERVAL = 60000  # 60 seconds, the average of the band above
 ACTIVE_POLL_INTERVAL = 20000  # 20 seconds, the fastest rate Hoppie permits
 INACTIVITY_TIMEOUT = 300000  # 5 minutes
 

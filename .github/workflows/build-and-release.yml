@@ -5,44 +5,80 @@ on:
     tags:
       - "v*.*.*"
 
-# Define permissions needed for creating releases
 permissions:
-  contents: write  # This is required for creating releases
+  contents: write  # creating the release needs it
 
 jobs:
-  build-and-release:
+  test:
+    # Windows to match the build job: this is a Windows app and the GUI tests
+    # construct real wx windows.
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          fetch-depth: 0  # Fetch all history for tags
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+
+  build-and-release:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      - name: Extract version from release
+      - name: Extract version from the tag
         id: get_version
         shell: bash
         run: |
-          # Extract version without the 'v' prefix (e.g., v1.2.3 -> 1.2.3)
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version extracted: $VERSION"
 
+      - name: Check that the code carries the tagged version
+        shell: bash
+        env:
+          TAG_VERSION: ${{ steps.get_version.outputs.version }}
+        run: |
+          python - "$TAG_VERSION" <<'EOF'
+          import re, sys
+          tag = sys.argv[1]
+          source = open("src/config.py", encoding="utf-8").read()
+          app_version = re.search(r'^APP_VERSION = "([^"]+)"', source, re.M).group(1)
+          if app_version != tag:
+              sys.exit(f"APP_VERSION is {app_version!r} but the tag says {tag!r}: "
+                       f"fix the version, commit, and move the tag (see RELEASING.md)")
+          print(f"APP_VERSION {app_version} matches the tag")
+          EOF
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Update version numbers
-        run: python update_version.py ${{ steps.get_version.outputs.version }}
+          pip install -r requirements-build.txt
 
       - name: Build with PyInstaller
-        run: |
-          pyinstaller app.spec
+        run: pyinstaller app.spec
 
       - name: Run Inno Setup
         uses: robin24/inno-setup-action@v1
@@ -50,7 +86,6 @@ jobs:
           filepath: ./sim-cpdlc.iss
 
       - name: Upload Release Asset
-        id: upload_release_asset
         uses: softprops/action-gh-release@v2
         with:
           files: |

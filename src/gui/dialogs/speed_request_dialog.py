@@ -41,7 +41,7 @@ class SpeedRequestDialog(wx.Dialog):
         self.helper_text = wx.StaticText(
             self, label="Enter Mach number without decimal (e.g. 082 for M0.82)"
         )
-        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))
+        self.helper_text.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons

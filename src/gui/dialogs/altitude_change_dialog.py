@@ -39,7 +39,7 @@ class AltitudeChangeDialog(wx.Dialog):
             self,
             label="Enter flight level, 2 or 3 digits from 10 to 600 (e.g. 350 for FL350)",
         )
-        self.helper_text.SetForegroundColour(wx.Colour(100, 100, 100))  # Gray color
+        self.helper_text.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
         vbox.Add(self.helper_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         # Reason radio buttons

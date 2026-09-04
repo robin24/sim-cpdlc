@@ -1,6 +1,5 @@
 """CPDLC session management for the client."""
 
-import logging
 import time
 from typing import Optional, Callable
 
@@ -27,18 +26,19 @@ class CpdlcSession:
         self,
         logger,
         connection_manager: ConnectionManager,
+        *,
+        worker,
         clock: Callable[[], float] = time.monotonic,
-        worker=None,
     ):
         """Initialize the CPDLC session.
 
         Args:
             logger: Application logger
             connection_manager: Connection manager instance
+            worker: The NetworkWorker that transmits the frames (required)
             clock: Returns the current time in seconds. Monotonic, so the
                 session's time windows are not upset by a clock change; tests
                 pass a hand-driven clock.
-            worker: The NetworkWorker that performs the requests and sends
         """
         self.logger = logger
         self.connection_manager = connection_manager

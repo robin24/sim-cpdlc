@@ -35,14 +35,10 @@ class ConnectDialog(wx.Dialog):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        # Network selection
-        network_label = wx.StaticText(self, label="Select Network:")
-        vbox.Add(network_label, 0, wx.ALL, 5)
-
         # Radio buttons for network selection
         self.network_radio_box = wx.RadioBox(
             self,
-            label="",
+            label="Network",
             choices=["SayIntentions ACARS", "Hoppie ACARS"],
             majorDimension=1,
             style=wx.RA_SPECIFY_COLS,

@@ -434,6 +434,18 @@ def test_every_dialog_is_counted_while_it_is_open(window, monkeypatch):
     assert window._modal_depth == 0
 
 
+def test_the_about_box_is_counted_while_it_is_open(window, monkeypatch):
+    """wx.adv.AboutBox is not a wx.Dialog, so the ShowModal patch above never
+    sees it; the update prompt must still wait for it."""
+    depths = []
+    monkeypatch.setattr(mw, "show_about_dialog", lambda parent: depths.append(window._modal_depth))
+
+    window.on_about(None)
+
+    assert depths == [1]
+    assert window._modal_depth == 0
+
+
 # --- the automatic update check ------------------------------------------------
 
 
@@ -615,3 +627,40 @@ def test_stop_all_through_the_real_dialog_stops_and_announces_every_report(windo
         )
     finally:
         dlg.Destroy()
+
+
+# --- the logon gate ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "handler, action",
+    [
+        ("on_logoff", "log off"),
+        ("on_altitude_change", "request an altitude change"),
+        ("on_direct_request", "request a direct routing"),
+        ("on_speed_request", "request a speed change"),
+        ("on_when_can_we_expect", "send a when-can-we-expect inquiry"),
+    ],
+)
+def test_a_request_without_a_logon_is_refused_with_one_message(window, message_boxes, handler, action):
+    """Five handlers hand-rolled the same box with three different wordings."""
+    window.connection_manager = FakeConnectionManager()
+    window.cpdlc_session.connection_manager = window.connection_manager
+
+    getattr(window, handler)(None)
+
+    assert message_boxes.calls == [
+        (f"You must be logged on to a station to {action}.", "Not Logged On", wx.OK | wx.ICON_INFORMATION)
+    ]
+
+
+def test_logoff_is_refused_without_a_connection_before_the_logon_is_even_checked(window, message_boxes):
+    """on_logoff only checked _require_logon, unlike every other station
+    action, which checks _require_connection first too. A fresh window's real
+    connection manager is not connected, so this must stop at the connection
+    gate and never get as far as asking whether we are logged on."""
+    window.on_logoff(None)
+
+    assert message_boxes.calls == [
+        ("You must be connected to the CPDLC network to log off.", "Not Connected", wx.OK | wx.ICON_INFORMATION)
+    ]

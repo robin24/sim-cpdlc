@@ -8,14 +8,17 @@ added_files = [
     # Add any other files/folders you need
 ]
 
-# Locate SimConnect.dll next to the installed SimConnect package
+# Locate SimConnect.dll next to the installed SimConnect package. Without it
+# the packaged build starts, but tuning the radio can never work, so a missing
+# DLL stops the build instead of shipping a broken installer.
+import os
 _sc_spec = importlib.util.find_spec('SimConnect')
-_sc_binaries = []
-if _sc_spec and _sc_spec.origin:
-    import os
-    _sc_dll = os.path.join(os.path.dirname(_sc_spec.origin), 'SimConnect.dll')
-    if os.path.isfile(_sc_dll):
-        _sc_binaries = [(_sc_dll, 'SimConnect')]
+if not (_sc_spec and _sc_spec.origin):
+    raise SystemExit("SimConnect package not found; pip install -r requirements-build.txt")
+_sc_dll = os.path.join(os.path.dirname(_sc_spec.origin), 'SimConnect.dll')
+if not os.path.isfile(_sc_dll):
+    raise SystemExit(f"SimConnect.dll not found at {_sc_dll}")
+_sc_binaries = [(_sc_dll, 'SimConnect')]
 
 a = Analysis(
     ['app.py'],
