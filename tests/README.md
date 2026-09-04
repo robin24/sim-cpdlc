@@ -33,7 +33,7 @@ starts a thread on purpose.
 | `test_config.py` | Reading, writing and clamping the configuration |
 | `test_connection_manager.py` | The network boundary: errors, timeouts, poll results, unreadable uplinks, the wire packets |
 | `test_cpdlc_session.py` | Session state: logon acceptance and rejection, the handover window, pending expiry, reset and identity |
-| `test_dialogs.py` | The weather request dialog's validation; the Connect and PDC dialogs filling in from SimBrief |
+| `test_dialogs.py` | The weather request dialog's validation; the Connect and PDC dialogs filling in from SimBrief; the Settings, Connect and PDC getters returning stripped fields |
 | `test_downlink_requests.py` | The exact text of every downlink the client can send, and every send failure, through the worker |
 | `test_error_reporting.py` | The last-resort exception reporter: one deferred dialog at a time |
 | `test_frequency_parser.py` | Which CONTACT/MONITOR texts tune the standby radio |
@@ -41,7 +41,7 @@ starts a thread on purpose.
 | `test_link_state.py` | The link state machine and its back-off ladder |
 | `test_link_status.py` | How the window announces a lost, restored or fatal link and unreadable uplinks |
 | `test_logon_status.py` | Logon state as reported to the user, including a logon nobody answered |
-| `test_main_window.py` | The real window: menu bindings, message list, weather toggles |
+| `test_main_window.py` | The real window: menu bindings, message list, weather toggles, settings |
 | `test_main_window_wiring.py` | `_init_ui` alone, on a stripped-down frame |
 | `test_message_formatting.py` | Packet prefix stripping and the list and detail text |
 | `test_message_manager.py` | Message storage, addressing and the full response table |

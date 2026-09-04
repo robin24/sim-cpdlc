@@ -177,9 +177,9 @@ class SettingsDialog(wx.Dialog):
                    auto_check_updates, auto_tune_com1, weather_update_interval)
         """
         return (
-            self.sayintentions_logon_code_text.GetValue(),
-            self.hoppie_logon_code_text.GetValue(),
-            self.simbrief_userid_text.GetValue(),
+            self.sayintentions_logon_code_text.GetValue().strip(),
+            self.hoppie_logon_code_text.GetValue().strip(),
+            self.simbrief_userid_text.GetValue().strip(),
             self.auto_check_updates_checkbox.GetValue(),
             self.auto_tune_com1_checkbox.GetValue(),
             self.weather_interval_spin.GetValue(),

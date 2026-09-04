@@ -461,7 +461,7 @@ def test_the_automatic_update_check_runs_in_a_packaged_build(build_window, monke
 
 
 class FakeSettingsDialog:
-    """Stands in for SettingsDialog: answers OK with auto-tune switched off."""
+    """Stands in for SettingsDialog: answers OK with auto-tune off and a 7-minute weather interval."""
 
     def __init__(self, *args, **kwargs):
         pass
@@ -470,7 +470,7 @@ class FakeSettingsDialog:
         return wx.ID_OK
 
     def get_settings(self):
-        return ("", "", "", False, False, 5)
+        return ("", "", "", False, False, 7)
 
     def Destroy(self):
         pass
@@ -485,3 +485,29 @@ def test_saving_settings_refreshes_the_auto_tune_cache(window, monkeypatch):
     window.on_settings(None)
 
     assert window._auto_tune_com1 is False
+
+
+def test_saved_settings_apply_the_weather_interval_at_once(window, monkeypatch, message_boxes):
+    monkeypatch.setattr(mw, "SettingsDialog", FakeSettingsDialog)
+
+    window.on_settings(None)
+
+    assert window.weather_monitor.interval_ms == 7 * 60000
+    assert message_boxes.calls[-1][:2] == (
+        "Settings saved. The weather interval applies now; logon codes apply to the next connection.",
+        "Settings Saved",
+    )
+
+
+def test_a_failed_save_changes_nothing(window, monkeypatch, message_boxes):
+    """The session and the file must agree: a setting the file did not take
+    is not applied for the rest of the session either."""
+    monkeypatch.setattr(mw, "SettingsDialog", FakeSettingsDialog)
+    monkeypatch.setattr(mw, "save_config", lambda config: False)
+    interval_before = window.weather_monitor.interval_ms
+
+    window.on_settings(None)
+
+    assert window.weather_monitor.interval_ms == interval_before
+    assert window._auto_tune_com1 is True
+    assert message_boxes.captions[-1] == "Error"

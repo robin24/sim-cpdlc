@@ -320,12 +320,13 @@ class MainWindow(wx.Frame):
             config["auto_check_updates"] = new_auto_check_updates
             config["auto_tune_com1"] = new_auto_tune_com1
             config["weather_update_interval"] = new_weather_interval
-            self.weather_monitor.set_interval(new_weather_interval * 60000)
             if save_config(config):
+                self.weather_monitor.set_interval(new_weather_interval * 60000)
                 self._auto_tune_com1 = new_auto_tune_com1
                 self.logger.info("Settings saved successfully")
                 self._message_box(
-                    "Settings saved successfully. The new settings will be used for future operations.",
+                    "Settings saved. The weather interval applies now; "
+                    "logon codes apply to the next connection.",
                     "Settings Saved",
                     wx.OK | wx.ICON_INFORMATION,
                 )

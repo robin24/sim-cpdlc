@@ -205,7 +205,7 @@ class ConnectDialog(wx.Dialog):
         Returns:
             tuple: (callsign, logon_code, network_type)
         """
-        callsign = self.callsign_text.GetValue().upper()
+        callsign = self.callsign_text.GetValue().strip().upper()
         selection = self.network_radio_box.GetSelection()
 
         # Determine network type
@@ -220,6 +220,6 @@ class ConnectDialog(wx.Dialog):
                 logon_code = self.saved_hoppie_logon_code
         else:
             # Otherwise use the value entered in the field
-            logon_code = self.logon_code_text.GetValue()
+            logon_code = self.logon_code_text.GetValue().strip()
 
         return callsign, logon_code, network_type

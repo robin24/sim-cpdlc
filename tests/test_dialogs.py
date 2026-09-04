@@ -4,10 +4,9 @@ The OK button is the guard: a dialog that lets an incomplete request through
 sends malformed text to a controller.
 """
 
-import pytest
 import wx
 
-from src.gui.dialogs import ConnectDialog, PDCDialog, WeatherDialog
+from src.gui.dialogs import ConnectDialog, PDCDialog, SettingsDialog, WeatherDialog
 
 
 def _fire_auto_update_toggle(weather):
@@ -206,3 +205,37 @@ def test_a_simbrief_answer_after_the_pdc_dialog_closed_is_ignored(frame):
     dialog.Destroy()
 
     fetch.on_done({"origin": {"icao_code": "EGLL"}})
+
+
+# --- the getters return what was validated -----------------------------------
+
+
+def test_settings_are_returned_without_surrounding_whitespace(dialog):
+    """A logon code saved with a trailing space failed every later connection."""
+    settings = dialog(SettingsDialog)
+    settings.sayintentions_logon_code_text.SetValue(" si-code ")
+    settings.hoppie_logon_code_text.SetValue("hoppie-code\t")
+    settings.simbrief_userid_text.SetValue(" 123456 ")
+
+    assert settings.get_settings()[:3] == ("si-code", "hoppie-code", "123456")
+
+
+def test_connection_details_are_returned_stripped(dialog):
+    connect = dialog(ConnectDialog, fetch_simbrief=RecordingFetch(configured=False))
+    connect.callsign_text.SetValue(" dlh123 ")
+    connect.logon_code_text.SetValue(" secret ")
+
+    callsign, logon_code, _ = connect.get_connection_details()
+
+    assert (callsign, logon_code) == ("DLH123", "secret")
+
+
+def test_pdc_details_are_returned_stripped(dialog):
+    pdc = dialog(PDCDialog, fetch_simbrief=RecordingFetch(configured=False))
+    pdc.origin_icao_text.SetValue(" eddf ")
+    pdc.destination_icao_text.SetValue("egll ")
+    pdc.aircraft_text.SetValue(" a320")
+    pdc.stand_text.SetValue(" A12 ")
+    pdc.atis_text.SetValue(" k ")
+
+    assert pdc.get_pdc_details() == ("EDDF", "EGLL", "A320", "A12", "K")
