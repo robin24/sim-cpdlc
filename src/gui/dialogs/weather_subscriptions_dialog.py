@@ -15,19 +15,23 @@ class WeatherSubscriptionsDialog(wx.Dialog):
     individual subscriptions or check them all immediately.
     """
 
-    def __init__(self, parent, weather_monitor):
+    def __init__(self, parent, weather_monitor, on_stop):
         """
         Initialize the subscriptions dialog.
 
         Args:
             parent: The parent window
-            weather_monitor: The WeatherMonitor instance to manage
+            weather_monitor: The WeatherMonitor whose subscriptions are listed
+            on_stop: Callable(icao, info_type) that stops one report's updates
+                and tells the pilot; the window's helper, so a stop from here
+                reads the same as one from the report's context menu
         """
         wx.Dialog.__init__(
             self, parent, wx.ID_ANY, "Automatic Weather Updates", size=(-1, -1)
         )
 
         self.weather_monitor = weather_monitor
+        self._stop_updates = on_stop
         self._keys = []
 
         vbox = wx.BoxSizer(wx.VERTICAL)
@@ -71,6 +75,12 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         self.subscription_list.Bind(wx.EVT_LISTBOX, self._update_button_state)
 
         self._refresh()
+        self._stop_listening = weather_monitor.subscribe_to_changes(self._refresh)
+
+    def Destroy(self):
+        """Stop following the monitor before wx tears the list down."""
+        self._stop_listening()
+        return super().Destroy()
 
     def _format_entry(self, subscription):
         """Build the list entry text for one subscription.
@@ -92,14 +102,17 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         return f"{label} {subscription.icao}, {status}"
 
     def _refresh(self):
-        """Rebuild the list from the monitor's current subscriptions."""
+        """Rebuild the list from the monitor, keeping the selected report if it is still there."""
+        selected = self.subscription_list.GetSelection()
+        selected_key = self._keys[selected] if 0 <= selected < len(self._keys) else None
+
         subscriptions = self.weather_monitor.get_subscriptions()
         self._keys = [s.key for s in subscriptions]
-
         self.subscription_list.Set([self._format_entry(s) for s in subscriptions])
 
         if subscriptions:
-            self.subscription_list.SetSelection(0)
+            index = self._keys.index(selected_key) if selected_key in self._keys else 0
+            self.subscription_list.SetSelection(index)
 
         self._update_button_state(None)
 
@@ -129,18 +142,17 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         wx.MessageBox(message, "Automatic Weather Updates", wx.OK | wx.ICON_INFORMATION)
 
     def on_stop(self, _):
-        """Stop updating the selected report."""
+        """Stop updating the selected report, through the window so it is announced."""
         index = self.subscription_list.GetSelection()
         if index == wx.NOT_FOUND or index >= len(self._keys):
             return
 
         icao, info_type = self._keys[index]
-        self.weather_monitor.unsubscribe(icao, info_type)
-        self._refresh()
+        self._stop_updates(icao, info_type)
 
     def on_stop_all(self, _):
-        """Stop updating every report."""
-        if self.weather_monitor.count() == 0:
+        """Stop updating every report, after confirming."""
+        if not self._keys:
             return
 
         if (
@@ -153,5 +165,7 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         ):
             return
 
-        self.weather_monitor.clear()
-        self._refresh()
+        # The monitor's notification rebuilds self._keys as each report goes,
+        # so iterate over a copy.
+        for icao, info_type in list(self._keys):
+            self._stop_updates(icao, info_type)

@@ -20,6 +20,7 @@ from src.config import DEFAULT_CONFIG, MESSAGE_SOUND_FILENAME, save_config
 from src.gui.dialogs import WeatherDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
+from src.utils.weather_parsing import report_type_label
 from tests.support import FakeConnectionManager, FakeSimConnectManager
 
 # Which handler each menu item must fire. Every handler is replaced on the
@@ -543,3 +544,44 @@ def test_the_window_loads_its_sound_from_another_working_directory(build_window,
     window = build_window()
 
     assert window.new_message_sound is not None
+
+
+# --- stopping automatic weather updates ------------------------------------------
+
+
+def test_stopping_updates_from_the_subscriptions_dialog_is_announced(window):
+    """The dialog's Stop button used to remove the row silently, while the
+    other two stop paths add a SYSTEM row and set the status text."""
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+    label = report_type_label("vatatis")
+
+    window._stop_weather_updates("EGLL", "vatatis")
+
+    assert window.weather_monitor.count() == 0
+    row = last_row(window)
+    assert window.message_view.message_list.GetItemText(row, 0) == "SYSTEM"
+    assert window.message_view.message_list.GetItemText(row, 1) == (
+        f"Stopped automatic updates for {label} EGLL"
+    )
+    assert window.GetStatusBar().GetStatusText() == f"Stopped watching {label} EGLL."
+
+
+def test_the_subscriptions_dialog_stops_reports_through_the_window(window, monkeypatch):
+    opened = []
+
+    class FakeSubscriptionsDialog:
+        def __init__(self, parent, weather_monitor, on_stop):
+            opened.append((weather_monitor, on_stop))
+
+        def ShowModal(self):
+            return wx.ID_CANCEL
+
+        def Destroy(self):
+            pass
+
+    monkeypatch.setattr(mw, "WeatherSubscriptionsDialog", FakeSubscriptionsDialog)
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+
+    window.on_weather_subscriptions(None)
+
+    assert opened == [(window.weather_monitor, window._stop_weather_updates)]

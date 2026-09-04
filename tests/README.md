@@ -53,9 +53,10 @@ starts a thread on purpose.
 | `test_simconnect_manager.py` | The SimConnect tune path: no connecting on its own, the simulator's answer believed |
 | `test_update_checker.py` | The update check off the GUI thread, and the prompt that waits for open dialogs |
 | `test_uplink_handling.py` | HANDOVER, LOGOFF, LOGON REJECTED, protocol noise and auto-tune through the window, including the station that handed over |
-| `test_weather_monitor.py` | Weather change detection, the update cycle on the worker, the timer lifecycle |
+| `test_weather_monitor.py` | Weather change detection, the update cycle on the worker, the timer lifecycle, change listeners |
 | `test_weather_parsing.py` | The report registry, the ATIS letter and the report formatters |
 | `test_weather_requests.py` | The manual weather request through the window; the report or the error arrives from the worker |
+| `test_weather_subscriptions_dialog.py` | The automatic weather updates dialog: what it lists, stopping through the window, following the monitor |
 
 `test_downlink_requests.py` asserts message text literally, so a change to a
 format shows up there before it reaches the network.

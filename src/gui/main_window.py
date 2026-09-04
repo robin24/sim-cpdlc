@@ -1071,7 +1071,9 @@ class MainWindow(wx.Frame):
             )
             return
 
-        with self._show_dialog(WeatherSubscriptionsDialog(self, self.weather_monitor)):
+        with self._show_dialog(
+            WeatherSubscriptionsDialog(self, self.weather_monitor, self._stop_weather_updates)
+        ):
             pass
 
     def _on_weather_update(self, subscription, text, description):
@@ -1268,6 +1270,23 @@ class MainWindow(wx.Frame):
         """
         return self.weather_monitor.is_subscribed(icao, info_type)
 
+    def _stop_weather_updates(self, icao, info_type):
+        """Stop automatic updates for a report and say so.
+
+        The report's context menu and the subscriptions dialog both come
+        through here, so the SYSTEM row and the status text read the same.
+
+        Args:
+            icao: Airport ICAO code
+            info_type: Report type key
+        """
+        label = report_type_label(info_type)
+        self.weather_monitor.unsubscribe(icao, info_type)
+        self._add_custom_message(
+            f"Stopped automatic updates for {label} {icao}", "SYSTEM"
+        )
+        self.SetStatusText(f"Stopped watching {label} {icao}.")
+
     def _on_toggle_weather_updates(self, icao, info_type, text=None):
         """Start or stop automatic updates for a report.
 
@@ -1281,11 +1300,7 @@ class MainWindow(wx.Frame):
         label = report_type_label(info_type)
 
         if self.weather_monitor.is_subscribed(icao, info_type):
-            self.weather_monitor.unsubscribe(icao, info_type)
-            self._add_custom_message(
-                f"Stopped automatic updates for {label} {icao}", "SYSTEM"
-            )
-            self.SetStatusText(f"Stopped watching {label} {icao}.")
+            self._stop_weather_updates(icao, info_type)
             return
 
         self.weather_monitor.subscribe(icao, info_type, initial_text=text)
