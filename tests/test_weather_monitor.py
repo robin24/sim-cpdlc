@@ -259,6 +259,21 @@ def test_results_of_a_stopped_cycle_are_ignored(logger, frame):
     assert errors == []
 
 
+def test_a_stopped_cycle_makes_no_more_requests(logger, frame):
+    """On a lost link the monitor is stopped so it does not hammer the dead
+    link; the jobs already queued must not do so either."""
+    connection = ScriptedConnection(["EGLL 1150Z"])
+    monitor, worker = build(logger, frame, connection)
+    monitor.subscribe("EGLL", "metar")
+    monitor.subscribe("EDDF", "metar")
+    monitor.check_now()
+    monitor.stop()
+
+    worker.run_pending()
+
+    assert connection.calls == 0
+
+
 def test_a_failed_fetch_counts_against_the_subscription(logger, frame):
     monitor, worker = build(logger, frame, ScriptedConnection([HoppieError("no data")]))
     monitor.subscribe("EGLL", "metar")

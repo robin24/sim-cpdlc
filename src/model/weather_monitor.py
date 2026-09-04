@@ -275,11 +275,30 @@ class WeatherMonitor:
         for icao, info_type in pending:
             self.worker.submit(
                 "inforeq",
-                functools.partial(self.connection_manager.send_info_request, info_type, icao),
+                functools.partial(self._fetch_if_current, cycle, info_type, icao),
                 functools.partial(self._on_job_done, cycle, icao, info_type),
                 PRIORITY_INFO,
             )
         return True
+
+    def _fetch_if_current(self, cycle, info_type, icao):
+        """Fetch one report, unless the cycle was cancelled while the job queued.
+
+        Runs on the worker. stop() bumps the cycle id, so a job from an old
+        cycle must not spend a network round trip on a report nobody will
+        apply.
+
+        Args:
+            cycle: The cycle id the job was submitted under
+            info_type: Report type key
+            icao: Airport ICAO code
+
+        Returns:
+            The report text, or None when the cycle is no longer current
+        """
+        if cycle != self._cycle_id:
+            return None
+        return self.connection_manager.send_info_request(info_type, icao)
 
     def _on_job_done(self, cycle, icao, info_type, result):
         """Apply one fetch result to the cycle it belongs to. Runs on the GUI thread.

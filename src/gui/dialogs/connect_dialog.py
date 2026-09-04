@@ -116,9 +116,15 @@ class ConnectDialog(wx.Dialog):
             self.logger.info(f"Found callsign in SimBrief OFP: {callsign}")
             self.callsign_text.SetValue(callsign)
             self.simbrief_status.SetLabel("Callsign taken from your SimBrief flight plan.")
-        else:
+        elif not ofp_data:
+            # Nothing came back: the network, the account or the ID is at fault.
             self.logger.warning("Could not fetch flight plan from SimBrief")
             self.simbrief_status.SetLabel("Could not fetch flight plan from SimBrief.")
+        else:
+            # The plan is there but says nothing about the callsign, which the
+            # pilot fixes in SimBrief rather than by fetching again.
+            self.logger.warning("SimBrief OFP has no callsign")
+            self.simbrief_status.SetLabel("Your SimBrief flight plan has no callsign.")
 
         self.on_text_change(None)
         self.Layout()

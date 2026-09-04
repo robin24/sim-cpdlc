@@ -10,12 +10,7 @@ from contextlib import contextmanager
 import wx
 import wx.adv
 
-from hoppie_connector import (
-    CpdlcMessage,
-    CpdlcResponseRequirement as RR,
-    HoppieError,
-    HoppieMessage,
-)
+from hoppie_connector import CpdlcMessage
 
 from src.config import (
     APP_VERSION,
@@ -479,14 +474,7 @@ class MainWindow(wx.Frame):
         Args:
             result: The worker's JobResult (disconnect() cannot fail)
         """
-        # Anything still queued belonged to the old session.
-        self.worker.new_generation()
-        # Their results were just dropped with the generation.
-        self._responses_in_flight.clear()
-        # A simulator reconnect still out reports into the dropped generation,
-        # so its callback never runs; forget it, or auto-tune stays wedged.
-        self._simconnect_reconnecting = False
-        self._pending_tune = None
+        self._drop_session_work()
         # Belt and braces: nothing queued during the disconnect may leave a dialogue behind.
         self.cpdlc_session.reset()
 
@@ -499,6 +487,17 @@ class MainWindow(wx.Frame):
 
         # Add system message
         self._add_custom_message("Disconnected from CPDLC network", "SYSTEM")
+
+    def _drop_session_work(self):
+        """Forget everything queued or in flight for the session that just ended."""
+        # Anything still queued belonged to the old session.
+        self.worker.new_generation()
+        # Their results were just dropped with the generation.
+        self._responses_in_flight.clear()
+        # A simulator reconnect still out reports into the dropped generation,
+        # so its callback never runs; forget it, or auto-tune stays wedged.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
 
     def on_logon(self, _):
         """Initiate logon to a CPDLC station."""
@@ -1155,13 +1154,7 @@ class MainWindow(wx.Frame):
         self.logger.error(f"Disconnecting after a fatal link error: {reason}")
         self.polling_controller.stop()
         # Nothing queued for this session may run or report now.
-        self.worker.new_generation()
-        # Their results were just dropped with the generation.
-        self._responses_in_flight.clear()
-        # A simulator reconnect still out reports into the dropped generation,
-        # so its callback never runs; forget it, or auto-tune stays wedged.
-        self._simconnect_reconnecting = False
-        self._pending_tune = None
+        self._drop_session_work()
         self.weather_monitor.stop()
         self.weather_monitor.clear()
         self.connection_manager.disconnect()

@@ -79,7 +79,8 @@ class NetworkWorker:
         spacing: {kind: seconds} minimum gap between two jobs of a kind;
             DEFAULT_SPACING when None
         clock: Monotonic time source; injectable for the spacing tests
-        sleep: Sleep function; injectable for the spacing tests
+        sleep: Sleep function; the worker's own wake-able wait when None,
+            injectable for the spacing tests
     """
 
     def __init__(
@@ -89,13 +90,16 @@ class NetworkWorker:
         start_thread=True,
         spacing=None,
         clock=time.monotonic,
-        sleep=time.sleep,
+        sleep=None,
     ):
         self.logger = logger
         self._dispatch = dispatch
         self._spacing = dict(DEFAULT_SPACING if spacing is None else spacing)
         self._clock = clock
-        self._sleep = sleep
+        # Event.wait(timeout) returns early once the event is set, so shutdown
+        # can cut a pacing wait short instead of waiting the gap out.
+        self._wake = threading.Event()
+        self._sleep = sleep if sleep is not None else self._wake.wait
         self._queue = queue.PriorityQueue()
         self._sequence = itertools.count()
         self._generation = 0
@@ -181,15 +185,18 @@ class NetworkWorker:
 
         Jobs still queued run to completion, but nothing is delivered from
         this point on: a result produced while draining must not reach a
-        window that is going away. With a thread, a stop marker is queued
-        behind everything pending and the thread is given `timeout` seconds
-        to reach it; a job stuck in a network call is abandoned (the thread
-        is a daemon). Without a thread the queue is run inline.
+        window that is going away. Pacing stops too, so the whole `timeout`
+        is left for the requests themselves. With a thread, a stop marker is
+        queued behind everything pending and the thread is given `timeout`
+        seconds to reach it; a job stuck in a network call is abandoned (the
+        thread is a daemon). Without a thread the queue is run inline.
 
         Args:
             timeout: Seconds to wait for the queue to drain
         """
         self._alive = False
+        # Wake a pacer mid-sleep; the queue drains without further spacing.
+        self._wake.set()
         if self._thread is None:
             self.run_pending()
         else:
@@ -224,6 +231,11 @@ class NetworkWorker:
 
     def _pace(self, kind):
         """Wait until the gap the servers ask for has passed since the last job of this kind."""
+        if not self._alive:
+            # Shutdown has begun: the last frames go out at once rather than
+            # waiting for a gap nobody will see.
+            return
+
         gap = self._spacing.get(kind)
         last = self._last_finished.get(kind)
         if gap is None or last is None:
@@ -250,13 +262,13 @@ class NetworkWorker:
 
     def _deliver(self, job, result):
         """Hand a result to its callback on the GUI thread."""
+        if job.on_done is None:
+            return
+
         if not self._alive:
             self.logger.info(
                 f"Dropped the result of a {job.kind} job after shutdown (ok={result.ok}, error={result.error})"
             )
-            return
-
-        if job.on_done is None:
             return
 
         try:

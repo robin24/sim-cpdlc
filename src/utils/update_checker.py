@@ -55,7 +55,10 @@ class UpdateChecker:
             on_done: Callable(UpdateOutcome), run on the GUI thread
         """
         self.worker.submit(
-            "update", self._get_latest_version, functools.partial(self._report, on_done), PRIORITY_INFO
+            "update",
+            self._get_latest_version,
+            functools.partial(self._report, on_done),
+            PRIORITY_INFO,
         )
 
     def _report(self, on_done, result):

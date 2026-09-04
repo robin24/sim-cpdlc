@@ -135,6 +135,18 @@ def test_a_failed_simbrief_fetch_is_shown_in_the_dialog_not_a_message_box(frame,
         dialog.Destroy()
 
 
+def test_a_plan_without_a_callsign_is_told_apart_from_a_failed_fetch(frame):
+    fetch = RecordingFetch()
+    dialog = ConnectDialog(frame, fetch_simbrief=fetch)
+    try:
+        fetch.on_done({"atc": {}})
+
+        assert dialog.simbrief_status.GetLabel() == "Your SimBrief flight plan has no callsign."
+        assert dialog.callsign_text.GetValue() == ""
+    finally:
+        dialog.Destroy()
+
+
 def test_a_simbrief_answer_after_the_dialog_closed_is_ignored(frame):
     """The pilot may press OK or Cancel before SimBrief answers."""
     fetch = RecordingFetch()

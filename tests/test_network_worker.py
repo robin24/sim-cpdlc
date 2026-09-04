@@ -7,6 +7,7 @@ using while a request is out.
 
 import logging
 import threading
+import time
 
 import pytest
 
@@ -259,6 +260,25 @@ def test_shutdown_runs_queued_jobs_but_delivers_nothing(logger):
     assert reported == []
 
 
+def test_shutdown_drains_without_pacing(logger):
+    """The exit LOGOFF must not wait out the send gap: the join budget is for
+    the request itself."""
+    clock = FakeClock()
+    slept = []
+    worker = NetworkWorker(
+        logger, dispatch=inline, start_thread=False, spacing={"send": 5}, clock=clock, sleep=slept.append
+    )
+    worker.submit("send", lambda: None, priority=PRIORITY_SEND)
+    worker.run_pending()
+    ran = []
+    worker.submit("send", lambda: ran.append("LOGOFF"), priority=PRIORITY_SEND)
+
+    worker.shutdown()
+
+    assert ran == ["LOGOFF"]
+    assert slept == []
+
+
 def test_the_real_thread_runs_jobs_and_stops_on_shutdown(logger):
     done = threading.Event()
     worker = NetworkWorker(logger, dispatch=inline)
@@ -268,4 +288,23 @@ def test_the_real_thread_runs_jobs_and_stops_on_shutdown(logger):
 
     worker.shutdown(timeout=5)
 
+    assert worker._thread.is_alive() is False
+
+
+def test_shutdown_wakes_a_pacer_that_is_already_asleep(logger):
+    """A send that entered its 5 s gap just before shutdown must go out now,
+    not when the gap ends."""
+    first_done = threading.Event()
+    second_ran = threading.Event()
+    worker = NetworkWorker(logger, dispatch=inline, spacing={"send": 5})
+    worker.submit("send", lambda: first_done.set(), priority=PRIORITY_SEND)
+    assert first_done.wait(5) is True
+    worker.submit("send", lambda: second_ran.set(), priority=PRIORITY_SEND)
+    time.sleep(0.2)  # let the worker reach _pace and start its wait
+
+    started = time.monotonic()
+    worker.shutdown(timeout=5)
+
+    assert second_ran.is_set() is True
+    assert time.monotonic() - started < 2
     assert worker._thread.is_alive() is False
