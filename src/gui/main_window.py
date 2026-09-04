@@ -52,9 +52,10 @@ from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
-# A HANDOVER names the next station as a 4-letter code; the @ separators the
-# networks wrap it in have been flattened to spaces by then.
-HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+([A-Z]{4})$")
+# A HANDOVER names the next station as a 4-letter code, wrapped in @ separators
+# by some networks and sometimes followed by free text. The word boundary keeps
+# "HANDOVER EDGGX" from reading as a handover to EDGG.
+HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+@?([A-Z]{4})\b")
 
 # The directory that holds app.py, src/ and assets/: two levels above this
 # file. A frozen build unpacks the same layout into sys._MEIPASS.
