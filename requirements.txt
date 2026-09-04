@@ -2,5 +2,5 @@ hoppie-connector==0.2.1
 requests==2.33.1
 wxPython==4.2.5
 appdirs==1.4.4
-packaging==26.2
+packaging==26.3
 SimConnect==0.4.26
