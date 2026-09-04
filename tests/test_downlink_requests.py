@@ -70,6 +70,7 @@ def test_a_request_without_a_connection_is_refused(make_session):
     session = make_session(connected=False)
 
     assert session.send_altitude_change_request("FL350") is False
+    assert sent(session) == []
 
 
 def test_a_send_is_queued_not_transmitted_at_once(session):
@@ -215,6 +216,8 @@ def test_a_pdc_request_needs_a_callsign(make_session):
     session.callsign = ""
 
     assert session.send_pdc_request("EGLL", "LIMC", "A339", "521", "K") is False
+    assert sent(session) == []
+    assert session.connection_manager.telexes == []
 
 
 # --- failure paths ------------------------------------------------------------

@@ -125,6 +125,10 @@ class MainWindow(wx.Frame):
             tick_callback=self._on_poll_tick,
             worker=self.worker,
         )
+        # message_id -> response text queued but not yet reported, so a second
+        # answer to the same uplink is refused until the first has gone out
+        # (or failed).
+        self._responses_in_flight = {}
         # Named once per episode; reset to False whenever the link recovers.
         self._callsign_clash_announced = False
 
@@ -430,9 +434,14 @@ class MainWindow(wx.Frame):
                 dlg.Destroy()
                 return
 
+            previous = self.cpdlc_session.get_current_station()
             self.SetStatusText(f"Logging on to {station}...")
             queued = self.cpdlc_session.logon(
-                station, functools.partial(self._on_logon_frame, station)
+                station,
+                functools.partial(self._on_logon_frame, station),
+                on_logoff_done=functools.partial(
+                    self._on_prelogon_logoff, previous, station
+                ),
             )
             if not queued:
                 wx.MessageBox(
@@ -444,8 +453,7 @@ class MainWindow(wx.Frame):
         dlg.Destroy()
 
     def _on_logon_frame(self, station, success, text_or_error):
-        """Report one frame of a manual logon: the LOGOFF that may precede it,
-        or the REQUEST LOGON itself. Runs on the GUI thread.
+        """Report the REQUEST LOGON of a manual logon. Runs on the GUI thread.
 
         Args:
             station: The station being logged on to
@@ -455,14 +463,35 @@ class MainWindow(wx.Frame):
         if success:
             self._add_custom_message(text_or_error)
             self.polling_controller.set_active_polling()
-            if text_or_error == "REQUEST LOGON":
-                self.SetStatusText(f"Pending logon to {station}.")
+            self.SetStatusText(f"Pending logon to {station}.")
             return
 
         error_detail = f": {text_or_error}" if text_or_error else ""
         self.SetStatusText(f"Could not log on to {station}.")
         wx.MessageBox(
             f"Failed to send logon request to {station}{error_detail}.",
+            "Error",
+            wx.OK | wx.ICON_ERROR,
+        )
+
+    def _on_prelogon_logoff(self, previous, station, success, text_or_error):
+        """Report the LOGOFF that a logon while logged on sends first. Runs on the GUI thread.
+
+        Args:
+            previous: The station the LOGOFF went to
+            station: The station being logged on to next
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+        """
+        if success:
+            self._add_custom_message(text_or_error)
+            return
+
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.logger.warning(f"Could not send LOGOFF to {previous}{error_detail}")
+        self.SetStatusText(f"Could not send LOGOFF to {previous}.")
+        wx.MessageBox(
+            f"Failed to send LOGOFF to {previous}{error_detail}. The logon to {station} goes ahead.",
             "Error",
             wx.OK | wx.ICON_ERROR,
         )
@@ -1231,7 +1260,19 @@ class MainWindow(wx.Frame):
             return
 
         sender, min_value = addressing
+
+        pending = self._responses_in_flight.get(message_id)
+        if pending is not None:
+            self.logger.info(
+                f"{response} for message ID {message_id} not queued: {pending} is already on its way"
+            )
+            self.SetStatusText(f"{response} not sent: {pending} is already on its way for this message.")
+            return
+
         self.SetStatusText(f"Sending {response}...")
+        # Claim the message before queueing, and give it back if the send was
+        # refused; _on_acknowledgement_sent releases it once the frame reports.
+        self._responses_in_flight[message_id] = response
         queued = self.cpdlc_session.send_acknowledgement(
             sender,
             min_value,
@@ -1239,6 +1280,7 @@ class MainWindow(wx.Frame):
             functools.partial(self._on_acknowledgement_sent, message_id, response),
         )
         if not queued:
+            self._responses_in_flight.pop(message_id, None)
             wx.MessageBox(
                 "Failed to send acknowledgement: not connected.",
                 "Error",
@@ -1254,6 +1296,7 @@ class MainWindow(wx.Frame):
             success: Whether the frame went out
             text_or_error: The frame text, or the error text
         """
+        self._responses_in_flight.pop(message_id, None)
         if success:
             # MessageManager decides whether this response retires the message;
             # STANDBY is sent but leaves it answerable.

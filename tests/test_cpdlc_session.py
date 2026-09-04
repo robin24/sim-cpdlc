@@ -186,15 +186,24 @@ def test_a_failed_logoff_does_not_stop_the_new_logon(logger):
     connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
     session = build(logger, connection)
     session.handle_logon_accepted("EDYY")
-    outcomes = []
+    logoffs = []
+    logons = []
 
-    assert session.logon("EDGG", lambda ok, text: outcomes.append((ok, text))) is True
+    assert (
+        session.logon(
+            "EDGG",
+            lambda ok, text: logons.append((ok, text)),
+            on_logoff_done=lambda ok, text: logoffs.append((ok, text)),
+        )
+        is True
+    )
     assert session.get_current_station() == ""
     assert session.pending_logon_station == "EDGG"
 
     session.worker.run_pending()
 
-    assert outcomes == [(False, "timed out"), (False, "timed out")]
+    assert logoffs == [(False, "timed out")]
+    assert logons == [(False, "timed out")]
     assert session.pending_logon_station is None
 
 

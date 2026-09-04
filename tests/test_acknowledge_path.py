@@ -126,3 +126,33 @@ def test_a_failed_acknowledgement_is_reported_and_stays_answerable(logger, messa
     assert "rate_limit" in message_boxes.calls[0][0]
     assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
     assert window.status_texts[-1] == "Could not send WILCO."
+
+
+def test_a_second_response_while_one_is_queued_is_refused(logger):
+    """WILCO then UNABLE within the pacing window used to put both on the
+    link; the second is refused until the first has reported."""
+    window, manager, connection = build(logger)
+    message_id = manager.add_message(uplink(STATION, 53))
+
+    window._on_acknowledge_message(message_id, "WILCO")
+    window._on_acknowledge_message(message_id, "UNABLE")
+
+    assert window.status_texts[-1] == "UNABLE not sent: WILCO is already on its way for this message."
+
+    window.worker.run_pending()
+
+    assert [frame[3] for frame in connection.sent] == ["WILCO"]
+    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
+
+
+def test_a_failed_response_frees_the_message_for_another_try(logger, message_boxes):
+    connection = FakeConnectionManager(raise_with=HoppieError("rate_limit"))
+    window, manager, _ = build(logger, connection)
+    message_id = manager.add_message(uplink(STATION, 53))
+    acknowledge(window, message_id, "WILCO")
+
+    connection.raise_with = None
+    acknowledge(window, message_id, "UNABLE")
+
+    assert [frame[3] for frame in connection.sent] == ["UNABLE"]
+    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])

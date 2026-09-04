@@ -177,17 +177,21 @@ class CpdlcSession:
         """
         return self.current_station
 
-    def logon(self, station: str, on_done=None) -> bool:
+    def logon(self, station: str, on_done=None, on_logoff_done=None) -> bool:
         """Log on to a CPDLC station.
 
         A station still logged on is sent LOGOFF first, so it learns the
         dialogue has ended before the next one starts (audit M-7); the worker
-        spaces the two frames out. Both frames report through on_done.
+        spaces the two frames out. The REQUEST LOGON reports through on_done,
+        the LOGOFF through on_logoff_done, so each can be named for itself.
 
         Args:
             station: The station to log on to
-            on_done: Callable(success, text_or_error), run on the GUI thread
-                once per frame
+            on_done: Callable(success, text_or_error) for the REQUEST LOGON,
+                run on the GUI thread
+            on_logoff_done: Callable(success, text_or_error) for the LOGOFF
+                that precedes the request when a station is logged on; on_done
+                is used when None
 
         Returns:
             bool: True if the request was queued, False if not connected or
@@ -205,7 +209,7 @@ class CpdlcSession:
             return False
 
         if self.current_station:
-            self.logoff(on_done)
+            self.logoff(on_done if on_logoff_done is None else on_logoff_done)
 
         self.logger.info(f"Attempting to logon to station: {station}")
         self.cpdlc_min_counter = 1

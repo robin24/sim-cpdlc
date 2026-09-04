@@ -235,3 +235,21 @@ def test_a_manual_logon_while_logged_on_echoes_the_logoff_it_sends(logger, monke
     assert [frame[3] for frame in connection.sent] == ["LOGOFF", "REQUEST LOGON"]
     assert rows(manager) == [(CLIENT_CALLSIGN, "LOGOFF"), (CLIENT_CALLSIGN, "REQUEST LOGON")]
     assert window.status_texts[-1] == "Pending logon to EDGG."
+
+
+def test_a_failed_logoff_before_a_relogon_is_named_correctly(logger, monkeypatch, message_boxes):
+    """The LOGOFF to the old station and the REQUEST LOGON to the new one
+    report separately, each naming its own station and frame."""
+    monkeypatch.setattr(mw, "LogonDialog", FakeLogonDialog)
+    connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
+    window, session, connection, _ = build(logger, connection)
+
+    window.on_logon(None)
+    window.worker.run_pending()
+
+    assert [call[0] for call in message_boxes.calls] == [
+        "Failed to send LOGOFF to EDYY: timed out. The logon to EDGG goes ahead.",
+        "Failed to send logon request to EDGG: timed out.",
+    ]
+    assert "Could not send LOGOFF to EDYY." in window.status_texts
+    assert window.status_texts[-1] == "Could not log on to EDGG."
