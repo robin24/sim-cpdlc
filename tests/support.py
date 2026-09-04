@@ -282,17 +282,26 @@ class FakeSound:
 
 
 class FakeCloseEvent:
-    """Stands in for the wx.CloseEvent on_close receives."""
+    """Stands in for the wx.CloseEvent on_close receives.
 
-    def __init__(self):
+    Args:
+        can_veto: What CanVeto() reports; False for a forced close (Windows
+            ending the session), which cannot be cancelled
+    """
+
+    def __init__(self, can_veto=True):
         self.skipped = False
         self.vetoed = False
+        self.can_veto = can_veto
 
     def Skip(self):
         self.skipped = True
 
     def Veto(self):
         self.vetoed = True
+
+    def CanVeto(self):
+        return self.can_veto
 
 
 class FakeClock:

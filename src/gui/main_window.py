@@ -1553,17 +1553,20 @@ class MainWindow(wx.Frame):
         """Handle application close event and perform cleanup."""
         self.logger.info("Application close event triggered")
 
-        # If connected, show confirmation dialog
         if self.connection_manager.is_connected():
-            if not self._confirm_exit(event):
+            # A forced close (Windows ending the session) cannot be vetoed, so
+            # there is nothing to ask.
+            if event.CanVeto() and not self._confirm_exit(event):
                 return
 
             self.logger.info("Exit confirmed, performing clean disconnect")
             self._end_dialogue()
-
-            # Stop polling
             self.polling_controller.stop()
 
+        # Let the LOGOFF just queued go out, then stop delivering results to a
+        # window that is about to be gone. A job stuck in a network call is
+        # abandoned after the timeout.
+        self.worker.shutdown(timeout=5)
         self.weather_monitor.shutdown()
         self.simconnect_manager.disconnect()
         self.logger.info("Application shutting down")

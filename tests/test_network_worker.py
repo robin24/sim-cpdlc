@@ -247,6 +247,18 @@ def test_nothing_is_delivered_after_shutdown(logger):
     assert reported == []
 
 
+def test_shutdown_runs_queued_jobs_but_delivers_nothing(logger):
+    """The LOGOFF queued by on_close goes out; its echo has nowhere to go."""
+    worker = inline_worker(logger)
+    ran, reported = [], []
+    worker.submit("send", lambda: ran.append("LOGOFF"), lambda result: reported.append(result))
+
+    worker.shutdown()
+
+    assert ran == ["LOGOFF"]
+    assert reported == []
+
+
 def test_the_real_thread_runs_jobs_and_stops_on_shutdown(logger):
     done = threading.Event()
     worker = NetworkWorker(logger, dispatch=inline)

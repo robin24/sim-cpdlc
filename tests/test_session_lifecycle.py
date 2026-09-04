@@ -187,11 +187,12 @@ def test_every_connection_gated_handler_refuses_while_the_link_is_busy(logger, m
 
 
 def test_exit_logs_off_and_forgets_the_dialogue(logger):
+    """on_close drains the worker before the window goes, so the LOGOFF it
+    queued goes out without the test running the worker itself."""
     window, session, connection, _ = build(logger)
     event = FakeCloseEvent()
 
     window.on_close(event)
-    window.worker.run_pending()
 
     assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
     assert dialogue(session) == ("", None, "", 1)
@@ -200,14 +201,29 @@ def test_exit_logs_off_and_forgets_the_dialogue(logger):
     assert event.skipped is True
 
 
-def test_exit_reports_a_logoff_it_could_not_send(logger):
+def test_a_forced_close_is_not_questioned_but_still_logs_off(logger, message_boxes):
+    """Windows ending the session cannot be vetoed; asking would only trip a
+    wx assertion and skip the cleanup (audit L-15)."""
+    message_boxes.answer = wx.NO
+    window, session, connection, _ = build(logger)
+    event = FakeCloseEvent(can_veto=False)
+
+    window.on_close(event)
+
+    assert message_boxes.calls == []
+    assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
+    assert (event.vetoed, event.skipped) == (False, True)
+
+
+def test_exit_still_sends_the_logoff_when_it_fails_but_shows_nothing_after(logger):
+    """The window is going away; a failed LOGOFF is logged by the worker, not
+    shown in a list nobody will read."""
     connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
     window, session, _, manager = build(logger, connection)
 
     window.on_close(FakeCloseEvent())
-    window.worker.run_pending()
 
-    assert rows(manager) == [("SYSTEM", "Could not send LOGOFF to EDYY: timed out")]
+    assert rows(manager) == []
     assert session.is_logged_on() is False
 
 
@@ -221,6 +237,34 @@ def test_a_vetoed_exit_keeps_the_logon(logger, message_boxes):
     assert event.vetoed is True
     assert session.get_current_station() == STATION
     assert connection.sent == []
+
+
+def test_nothing_reaches_the_window_after_it_has_closed(logger):
+    window, _, _, manager = build(logger)
+    window.on_close(FakeCloseEvent())
+    before = len(manager.message_log)
+
+    window.cpdlc_session.request_weather("metar", "EGLL", lambda ok, text: manager.add_custom_message("late", "SYSTEM"))
+    window.worker.run_pending()
+
+    assert len(manager.message_log) == before
+
+
+def test_a_simulator_reconnect_in_flight_at_close_reaches_nobody(logger):
+    """on_close drains the worker with delivery switched off, so the reconnect
+    still runs but its callback never touches the closing window."""
+    window, session, _, _ = build(logger)
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window.simconnect_manager = simconnect
+    window._on_message_received(uplink("EDYY", 7, "CONTACT MARSEILLE CONTROL ON @133.325@."))
+    assert window.worker.pending() == 1
+    texts_before = list(window.status_texts)
+
+    window.on_close(FakeCloseEvent())
+
+    assert simconnect.connects == 1
+    assert simconnect.tuned == [133.325]
+    assert window.status_texts == texts_before
 
 
 # --- a rejected logon code ----------------------------------------------------

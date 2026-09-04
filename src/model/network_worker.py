@@ -177,16 +177,19 @@ class NetworkWorker:
             self._execute(job)
 
     def shutdown(self, timeout=2.0):
-        """Let queued work drain, then stop delivering results.
+        """Stop delivering results, then let queued work drain.
 
-        With a thread, a stop marker is queued behind everything pending and
-        the thread is given `timeout` seconds to reach it; a job stuck in a
-        network call is abandoned (the thread is a daemon). Without a thread
-        the queue is run inline. Either way nothing is dispatched afterwards.
+        Jobs still queued run to completion, but nothing is delivered from
+        this point on: a result produced while draining must not reach a
+        window that is going away. With a thread, a stop marker is queued
+        behind everything pending and the thread is given `timeout` seconds
+        to reach it; a job stuck in a network call is abandoned (the thread
+        is a daemon). Without a thread the queue is run inline.
 
         Args:
             timeout: Seconds to wait for the queue to drain
         """
+        self._alive = False
         if self._thread is None:
             self.run_pending()
         else:
@@ -194,7 +197,6 @@ class NetworkWorker:
                 Job(_STOP_PRIORITY, next(self._sequence), _STOP, None, None, self._generation)
             )
             self._thread.join(timeout)
-        self._alive = False
 
     def _run(self):
         """The worker thread's loop."""
@@ -248,7 +250,13 @@ class NetworkWorker:
 
     def _deliver(self, job, result):
         """Hand a result to its callback on the GUI thread."""
-        if not self._alive or job.on_done is None:
+        if not self._alive:
+            self.logger.info(
+                f"Dropped the result of a {job.kind} job after shutdown (ok={result.ok}, error={result.error})"
+            )
+            return
+
+        if job.on_done is None:
             return
 
         try:
