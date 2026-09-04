@@ -74,8 +74,11 @@ class WeatherSubscriptionsDialog(wx.Dialog):
         self.stop_all_button.Bind(wx.EVT_BUTTON, self.on_stop_all)
         self.subscription_list.Bind(wx.EVT_LISTBOX, self._update_button_state)
 
-        self._refresh()
+        # Registered before the first refresh: if that refresh raised,
+        # Destroy() (run by the window's _show_dialog finally block) would
+        # otherwise hit a missing _stop_listening attribute.
         self._stop_listening = weather_monitor.subscribe_to_changes(self._refresh)
+        self._refresh()
 
     def Destroy(self):
         """Stop following the monitor before wx tears the list down."""

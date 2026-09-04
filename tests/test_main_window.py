@@ -17,7 +17,7 @@ import wx
 
 import src.gui.main_window as mw
 from src.config import DEFAULT_CONFIG, MESSAGE_SOUND_FILENAME, save_config
-from src.gui.dialogs import WeatherDialog
+from src.gui.dialogs import WeatherDialog, WeatherSubscriptionsDialog
 from src.model.message_manager import WeatherReport
 from src.model.weather_monitor import WeatherSubscription
 from src.utils.weather_parsing import report_type_label
@@ -585,3 +585,33 @@ def test_the_subscriptions_dialog_stops_reports_through_the_window(window, monke
     window.on_weather_subscriptions(None)
 
     assert opened == [(window.weather_monitor, window._stop_weather_updates)]
+
+
+def test_stop_all_through_the_real_dialog_stops_and_announces_every_report(window, message_boxes):
+    """The real dialog wired to the real window: Stop all must clear every
+    subscription, empty the dialog's own list, and announce each report
+    through the window so it reads the same as a stop from the context menu."""
+    window.weather_monitor.subscribe("EGKK", "metar")
+    window.weather_monitor.subscribe("EGLL", "vatatis")
+
+    dlg = WeatherSubscriptionsDialog(window, window.weather_monitor, window._stop_weather_updates)
+    try:
+        message_boxes.answer = wx.YES
+
+        dlg.on_stop_all(None)
+
+        assert window.weather_monitor.count() == 0
+        assert dlg.subscription_list.GetCount() == 0
+
+        count = window.message_view.message_list.GetItemCount()
+        metar_row, atis_row = count - 2, count - 1
+        assert window.message_view.message_list.GetItemText(metar_row, 0) == "SYSTEM"
+        assert window.message_view.message_list.GetItemText(metar_row, 1) == (
+            f"Stopped automatic updates for {report_type_label('metar')} EGKK"
+        )
+        assert window.message_view.message_list.GetItemText(atis_row, 0) == "SYSTEM"
+        assert window.message_view.message_list.GetItemText(atis_row, 1) == (
+            f"Stopped automatic updates for {report_type_label('vatatis')} EGLL"
+        )
+    finally:
+        dlg.Destroy()

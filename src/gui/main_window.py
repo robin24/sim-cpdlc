@@ -52,9 +52,10 @@ from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
 
-# A HANDOVER names the next station as a 4-letter code, wrapped in @ separators
-# by some networks and sometimes followed by free text. The word boundary keeps
-# "HANDOVER EDGGX" from reading as a handover to EDGG.
+# A HANDOVER names the next station as a 4-letter code. _protocol_text has
+# already flattened the @ separators some networks wrap the code in to plain
+# spaces before this ever runs, and trailing free text is allowed. The word
+# boundary keeps "HANDOVER EDGGX" from reading as a handover to EDGG.
 HANDOVER_PATTERN = re.compile(r"^HANDOVER\s+@?([A-Z]{4})\b")
 
 # The directory that holds app.py, src/ and assets/: two levels above this

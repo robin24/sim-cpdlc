@@ -138,6 +138,9 @@ class WeatherMonitor:
         """Stop the timer and drop every subscription."""
         self.stop()
         self._subscriptions.clear()
+        # A dialog cannot be open when the application shuts down, but a
+        # listener must not outlive the monitor's data.
+        self._listeners.clear()
         if self._timer is not None:
             self._timer.Destroy()
             self._timer = None

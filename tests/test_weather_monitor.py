@@ -351,3 +351,17 @@ def test_a_listener_that_raises_is_dropped_and_the_others_still_run(logger, fram
 
     assert heard == [1, 0]
     assert raised == ["raised"]
+
+
+def test_shutdown_drops_listeners_so_a_later_subscribe_does_not_reach_them(logger, frame):
+    """A listener must not outlive the monitor's data: shutdown() is the end
+    of the session, and no dialog can still be open to receive it."""
+    monitor = WeatherMonitor(logger, ScriptedConnection(), worker=inline_worker(logger))
+    monitor._parent = frame
+    heard = []
+    monitor.subscribe_to_changes(lambda: heard.append(monitor.count()))
+
+    monitor.shutdown()
+    monitor.subscribe("EGLL", "metar")
+
+    assert heard == []

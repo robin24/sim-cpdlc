@@ -4,7 +4,7 @@ import pytest
 import wx
 
 from tests.support import answerable, uplink
-from src.gui.message_view import MessageView
+from src.gui.message_view import MIN_MESSAGE_COLUMN_WIDTH, MessageView
 from src.model.message_manager import MessageManager
 
 STATION = "LSAG"
@@ -150,6 +150,18 @@ def test_a_resize_refits_the_columns(panel, logger):
 
     assert lst.GetColumnWidth(1) > narrow
     assert lst.GetColumnWidth(1) == lst.GetClientSize().width - lst.GetColumnWidth(0)
+
+
+def test_a_narrow_width_clamps_the_message_column(panel, logger):
+    """Below MIN_MESSAGE_COLUMN_WIDTH the list scrolls sideways instead of
+    truncating every row."""
+    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    lst = view.message_list
+    lst.SetSize((150, 200))
+
+    view._fit_columns()
+
+    assert lst.GetColumnWidth(1) == MIN_MESSAGE_COLUMN_WIDTH
 
 
 def test_a_long_sender_widens_its_column(panel, logger):
