@@ -117,10 +117,13 @@ MAX_CONNECTION_FAILURES = 3
 # the session.
 LINK_BACKOFF_MS = (20000, 60000, 120000, 300000)
 
-# SayIntentions answers "rate_limit" to a second message sent within a few
-# seconds of the first. A rate-limited acknowledgement is retried once after
-# this delay.
-RATE_LIMIT_RETRY_MS = 5000
+# Every network call runs on one worker thread, which keeps this much time
+# between two sends (SayIntentions answers "rate_limit" to a second message
+# within a few seconds of the first) and between two information requests
+# (so a handful of weather subscriptions does not reach the server as a
+# burst). Polls are not paced; the polling interval already spaces them.
+SEND_SPACING_SECONDS = 5
+INFOREQ_SPACING_SECONDS = 1
 
 # After a HANDOVER the station that handed the aircraft over may still send
 # a WILCO-required instruction (typically the CONTACT frequency); the log
@@ -161,10 +164,11 @@ def weather_interval_minutes(config):
 
     return max(MIN_WEATHER_INTERVAL_MINUTES, min(MAX_WEATHER_INTERVAL_MINUTES, minutes))
 
-# Network timeout in seconds, applied to every outbound ACARS request.
-# hoppie_connector sets no timeout of its own, so without this a server that
-# accepts the connection and then stops responding would block forever.
-NETWORK_TIMEOUT = 15
+# (connect, read) timeouts in seconds for every request the app makes. A
+# short connect timeout so a dead host fails fast; the read timeout applies
+# per response chunk, so it bounds a server that accepts the connection and
+# then goes silent.
+NETWORK_TIMEOUT = (10, 15)
 
 # Sound file path
 MESSAGE_SOUND_FILENAME = "message.wav"

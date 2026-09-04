@@ -1,158 +1,101 @@
-"""Update checker for the Sim-CPDLC application."""
+"""Update checker for the Sim-CPDLC application.
 
+The lookup runs on the network worker and reports an outcome; the window owns
+every prompt, so an "update available" message waits for any open dialog and
+never closes the application from under one (audit M-5).
+"""
+
+import functools
 import logging
-import threading
-import webbrowser
-import wx
+from dataclasses import dataclass
+from typing import Optional
+
 import requests
 from packaging import version
 
 from src.config import APP_VERSION, GITHUB_URL
+from src.model.network_worker import PRIORITY_INFO
+
+
+@dataclass
+class UpdateOutcome:
+    """What a check found.
+
+    Attributes:
+        latest: The latest released version, or None when it could not be read
+        url: The release page, or None
+        newer: True when latest is newer than the running version
+        error: The failure text when the lookup failed, else None
+    """
+
+    latest: Optional[str] = None
+    url: Optional[str] = None
+    newer: bool = False
+    error: Optional[str] = None
 
 
 class UpdateChecker:
-    """Check for updates to the application."""
+    """Looks up the latest release on GitHub, off the GUI thread."""
 
-    def __init__(self, parent, logger=None):
+    def __init__(self, logger=None, worker=None):
         """Initialize the update checker.
 
         Args:
-            parent: The parent window for dialogs
             logger: Optional logger instance
+            worker: The NetworkWorker that runs the lookup
         """
-        self.parent = parent
         self.logger = logger or logging.getLogger("Sim-CPDLC")
+        self.worker = worker
         self.current_version = APP_VERSION
 
-    def check_for_updates(self, auto_check=True):
-        """Check for updates to the application.
+    def check(self, on_done):
+        """Fetch the latest release and report it.
 
         Args:
-            auto_check: If True, check in background thread and only show dialog if update available
+            on_done: Callable(UpdateOutcome), run on the GUI thread
         """
-        if auto_check:
-            # Run in background thread to avoid blocking the UI
-            thread = threading.Thread(target=self._check_in_background)
-            thread.daemon = True
-            thread.start()
-        else:
-            # Run synchronously and show result dialog
-            self._check_and_show_result()
-
-    def _check_in_background(self):
-        """Check for updates in a background thread."""
-        try:
-            latest_version, release_url = self._get_latest_version()
-            if latest_version and self._is_newer_version(latest_version):
-                # Schedule dialog on the main thread, but only if the window is still alive
-                if self.parent and not self.parent.IsBeingDeleted():
-                    wx.CallAfter(self._show_update_dialog, latest_version, release_url)
-        except Exception as e:
-            self.logger.error(f"Error checking for updates: {e}")
-
-    def _check_and_show_result(self):
-        """Check for updates and show result dialog."""
-        try:
-            latest_version, release_url = self._get_latest_version()
-            if latest_version:
-                if self._is_newer_version(latest_version):
-                    self._show_update_dialog(latest_version, release_url)
-                else:
-                    wx.MessageBox(
-                        f"You are running the latest version ({self.current_version}).",
-                        "No Updates Available",
-                        wx.OK | wx.ICON_INFORMATION,
-                    )
-            else:
-                wx.MessageBox(
-                    "Could not retrieve version information from GitHub.",
-                    "Update Check Failed",
-                    wx.OK | wx.ICON_ERROR,
-                )
-        except Exception as e:
-            self.logger.error(f"Error checking for updates: {e}")
-            wx.MessageBox(
-                f"Error checking for updates: {e}",
-                "Update Check Failed",
-                wx.OK | wx.ICON_ERROR,
-            )
-
-    def _get_latest_version(self):
-        """Get the latest version from GitHub.
-
-        Returns:
-            tuple: (version_string, release_url) or (None, None) if error
-        """
-        try:
-            # Extract username and repo name from GitHub URL
-            # URL format: https://github.com/username/repo
-            parts = GITHUB_URL.strip("/").split("/")
-            username = parts[-2]
-            repo = parts[-1]
-
-            # Get latest release from GitHub API
-            api_url = f"https://api.github.com/repos/{username}/{repo}/releases/latest"
-            self.logger.debug(f"Checking for updates at: {api_url}")
-
-            response = requests.get(api_url, timeout=5)
-            response.raise_for_status()
-
-            data = response.json()
-            tag_name = data.get("tag_name", "")
-            html_url = data.get("html_url", "")
-
-            # Remove 'v' prefix if present
-            version_str = tag_name.lstrip("v")
-
-            return version_str, html_url
-        except Exception as e:
-            self.logger.error(f"Error getting latest version: {e}")
-            return None, None
-
-    def _is_newer_version(self, latest_version):
-        """Check if the latest version is newer than the current version.
-
-        Args:
-            latest_version: Version string to compare with current version
-
-        Returns:
-            bool: True if latest_version is newer
-        """
-        try:
-            return version.parse(latest_version) > version.parse(self.current_version)
-        except Exception as e:
-            self.logger.error(f"Error comparing versions: {e}")
-            return False
-
-    def _show_update_dialog(self, latest_version, release_url):
-        """Show update dialog and handle user response.
-
-        Args:
-            latest_version: The latest version string
-            release_url: URL to the latest release
-        """
-        result = wx.MessageBox(
-            f"A new version of Sim-CPDLC is available!\n\n"
-            f"Current version: {self.current_version}\n"
-            f"Latest version: {latest_version}\n\n"
-            f"Would you like to download the update now?",
-            "Update Available",
-            wx.YES_NO | wx.ICON_INFORMATION,
+        self.worker.submit(
+            "update",
+            self._get_latest_version,
+            functools.partial(self._report, on_done),
+            PRIORITY_INFO,
         )
 
-        if result == wx.YES:
-            self.logger.info(f"User chose to update to version {latest_version}")
-            try:
-                # Open release page in browser
-                webbrowser.open(release_url)
+    def _report(self, on_done, result):
+        """Turn the worker's result into an outcome. Runs on the GUI thread."""
+        if not result.ok:
+            self.logger.error(f"Error checking for updates: {result.error}")
+            on_done(UpdateOutcome(error=result.error))
+            return
 
-                # Close the application
-                wx.CallAfter(self.parent.Close)
-            except Exception as e:
-                self.logger.error(f"Error opening browser: {e}")
-                wx.MessageBox(
-                    f"Error opening browser: {e}\n\n"
-                    f"Please visit {release_url} manually to download the update.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
+        latest, url = result.value
+        on_done(UpdateOutcome(latest=latest, url=url, newer=self._is_newer_version(latest)))
+
+    def _get_latest_version(self):
+        """Read the latest release tag from GitHub. Runs on the worker.
+
+        Returns:
+            tuple: (version_string, release_url)
+
+        Raises:
+            Whatever requests raises; the worker turns it into a failed result.
+        """
+        # GITHUB_URL is https://github.com/<user>/<repo>
+        parts = GITHUB_URL.strip("/").split("/")
+        api_url = f"https://api.github.com/repos/{parts[-2]}/{parts[-1]}/releases/latest"
+        self.logger.debug(f"Checking for updates at: {api_url}")
+
+        response = requests.get(api_url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("tag_name", "").lstrip("v"), data.get("html_url", "")
+
+    def _is_newer_version(self, latest_version):
+        """Check if latest_version is newer than the running version."""
+        if not latest_version:
+            return False
+        try:
+            return version.parse(latest_version) > version.parse(self.current_version)
+        except Exception as exc:
+            self.logger.error(f"Error comparing versions: {exc}")
+            return False

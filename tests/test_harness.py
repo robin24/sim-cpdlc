@@ -13,7 +13,9 @@ import wx
 
 from src import config as config_module
 from src.config import DEFAULT_CONFIG, load_config, save_config
-from src.gui.dialogs import ConnectDialog
+from src.model.cpdlc_session import CpdlcSession
+from src.model.message_manager import MessageManager
+from tests.support import FakeConnectionManager, inline_worker, make_main_window
 
 
 def test_the_config_file_is_a_temporary_one(isolated_config, tmp_path):
@@ -52,17 +54,29 @@ def test_message_boxes_are_recorded_and_answered_without_showing(message_boxes):
     assert message_boxes.captions == ["Confirm"]
 
 
-def test_the_connect_dialog_never_reaches_simbrief(frame, no_simbrief, message_boxes):
-    """With a SimBrief id configured the dialog fetches the flight plan in its
-    constructor and warns when that fails; both must stay inside the test."""
-    save_config({**DEFAULT_CONFIG, "simbrief_userid": "189007"})
+def test_the_simbrief_fetch_never_leaves_the_test(logger, no_simbrief):
+    """With a SimBrief id configured the window fetches the flight plan on the
+    worker; the lookup must land on the fake, and the dialog must be told."""
+    session = CpdlcSession(logger, FakeConnectionManager(), worker=inline_worker(logger))
+    window = make_main_window(
+        logger, session, MessageManager(logger), config={"simbrief_userid": "189007"}
+    )
+    answers = []
 
-    dialog = ConnectDialog(frame)
-    try:
-        assert no_simbrief == ["189007"]
-        assert message_boxes.captions == ["SimBrief"]
-    finally:
-        dialog.Destroy()
+    assert window._fetch_simbrief(answers.append) is True
+    window.worker.run_pending()
+
+    assert no_simbrief == ["189007"]
+    assert answers == [None]
+
+
+def test_without_a_simbrief_id_nothing_is_fetched(logger, no_simbrief):
+    session = CpdlcSession(logger, FakeConnectionManager(), worker=inline_worker(logger))
+    window = make_main_window(logger, session, MessageManager(logger))
+
+    assert window._fetch_simbrief(lambda ofp: None) is False
+    assert window.worker.pending() == 0
+    assert no_simbrief == []
 
 
 def test_a_first_launch_asks_through_the_recorder_not_a_real_dialog(
@@ -77,5 +91,6 @@ def test_a_first_launch_asks_through_the_recorder_not_a_real_dialog(
         assert message_dialogs.captions == ["Welcome to Sim-CPDLC"]
         assert Path(isolated_config).exists()
     finally:
+        window.worker.shutdown(timeout=1)
         window.weather_monitor.shutdown()
         window.Destroy()

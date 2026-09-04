@@ -16,7 +16,10 @@ from tests.support import (
     FakeClock,
     FakeCloseEvent,
     FakeConnectionManager,
+    FakeSimConnectManager,
+    inline_worker,
     make_main_window,
+    uplink,
 )
 
 STATION = "EDYY"
@@ -25,7 +28,9 @@ STATION = "EDYY"
 def build(logger, connection=None):
     """A window logged on to EDYY as DLH123 on Hoppie, MIN counter at 1."""
     connection = connection if connection is not None else FakeConnectionManager()
-    session = CpdlcSession(logger, connection, clock=FakeClock())
+    session = CpdlcSession(
+        logger, connection, clock=FakeClock(), worker=inline_worker(logger)
+    )
     session.begin_session(CLIENT_CALLSIGN, "hoppie")
     session.handle_logon_accepted(STATION)
     manager = MessageManager(logger)
@@ -51,18 +56,28 @@ def dialogue(session):
 
 
 def test_disconnect_logs_off_and_forgets_the_dialogue(logger):
+    """The LOGOFF is queued ahead of the disconnect, so the connection is only
+    closed once it has gone out; the menu item comes back with the result."""
     window, session, connection, manager = build(logger)
 
     window.on_disconnect()
 
-    assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
     assert dialogue(session) == ("", None, "", 1)
+    assert window.status_texts[-1] == "Disconnecting..."
+    assert window.menu_item_connect.enabled is False
+    assert connection.disconnected is False
+
+    window.worker.run_pending()
+
+    assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
     assert connection.disconnected is True
     assert rows(manager) == [
         (CLIENT_CALLSIGN, "LOGOFF"),
         ("SYSTEM", "Disconnected from CPDLC network"),
     ]
-    assert window.status_texts == ["Disconnected from CPDLC network."]
+    assert window.status_texts[-1] == "Disconnected from CPDLC network."
+    assert (window.menu_item_connect.enabled, window.menu_item_connect.label) == (True, "&Connect")
+    assert window.worker.generation == 1
 
 
 def test_disconnect_forgets_the_dialogue_even_when_the_logoff_fails(logger):
@@ -72,10 +87,39 @@ def test_disconnect_forgets_the_dialogue_even_when_the_logoff_fails(logger):
     window, session, connection, manager = build(logger, connection)
 
     window.on_disconnect()
+    window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
-    assert rows(manager)[0] == ("SYSTEM", "Could not send LOGOFF to EDYY: timed out")
+    assert rows(manager) == [
+        ("SYSTEM", "Could not send LOGOFF to EDYY: timed out"),
+        ("SYSTEM", "Disconnected from CPDLC network"),
+    ]
     assert connection.disconnected is True
+
+
+def test_disconnect_forgets_the_responses_that_were_in_flight(logger):
+    """Their results were dropped with the generation, so nothing would ever
+    release them; the next session must not find the uplink blocked."""
+    window, session, connection, manager = build(logger)
+    window._responses_in_flight[7] = "WILCO"
+
+    window.on_disconnect()
+    window.worker.run_pending()
+
+    assert window._responses_in_flight == {}
+
+
+def test_disconnect_forgets_a_simulator_reconnect_that_was_out(logger):
+    """Its result reports into the dropped generation and never arrives; the
+    flag must not stay set, or no later CONTACT would ever be tuned."""
+    window, _, _, _ = build(logger)
+    window._simconnect_reconnecting = True
+    window._pending_tune = 133.325
+
+    window.on_disconnect()
+    window.worker.run_pending()
+
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
 
 
 def test_disconnect_closes_a_handover_in_progress(logger):
@@ -83,6 +127,7 @@ def test_disconnect_closes_a_handover_in_progress(logger):
     session.handle_handover(STATION, "EDGG")
 
     window.on_disconnect()
+    window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
     assert session.is_answerable_sender(STATION) is False
@@ -100,10 +145,50 @@ def test_a_cancelled_disconnect_changes_nothing(logger, message_boxes):
     assert connection.disconnected is False
 
 
+def test_a_request_during_the_disconnect_window_is_refused(logger, monkeypatch, message_boxes):
+    """Between Disconnect and the disconnect job reporting, is_connected() is
+    still True; a logon queued then would go out ahead of the disconnect and
+    leave a pending logon behind for the next session."""
+    monkeypatch.setattr(mw, "LogonDialog", FakeLogonDialog)
+    window, session, connection, _ = build(logger)
+    window.on_disconnect()
+
+    window.on_logon(None)
+
+    assert message_boxes.captions[-1] == "Not Connected"
+    assert session.pending_logon_station is None
+
+    window.worker.run_pending()
+
+    assert [frame[3] for frame in connection.sent] == ["LOGOFF"]
+    assert window._link_busy is False
+
+
+def test_every_connection_gated_handler_refuses_while_the_link_is_busy(logger, message_boxes):
+    window, _, _, _ = build(logger)
+    window._link_busy = True
+
+    for handler in (
+        window.on_logon,
+        window.on_altitude_change,
+        window.on_direct_request,
+        window.on_speed_request,
+        window.on_when_can_we_expect,
+        window.on_telex,
+        window.on_weather_request,
+        window.on_pdc_request,
+    ):
+        handler(None)
+
+    assert message_boxes.captions == ["Not Connected"] * 8
+
+
 # --- exit ---------------------------------------------------------------------
 
 
 def test_exit_logs_off_and_forgets_the_dialogue(logger):
+    """on_close drains the worker before the window goes, so the LOGOFF it
+    queued goes out without the test running the worker itself."""
     window, session, connection, _ = build(logger)
     event = FakeCloseEvent()
 
@@ -116,13 +201,29 @@ def test_exit_logs_off_and_forgets_the_dialogue(logger):
     assert event.skipped is True
 
 
-def test_exit_reports_a_logoff_it_could_not_send(logger):
+def test_a_forced_close_is_not_questioned_but_still_logs_off(logger, message_boxes):
+    """Windows ending the session cannot be vetoed; asking would only trip a
+    wx assertion and skip the cleanup (audit L-15)."""
+    message_boxes.answer = wx.NO
+    window, session, connection, _ = build(logger)
+    event = FakeCloseEvent(can_veto=False)
+
+    window.on_close(event)
+
+    assert message_boxes.calls == []
+    assert connection.sent == [(STATION, 1, RR.NOT_REQUIRED.value, "LOGOFF", None)]
+    assert (event.vetoed, event.skipped) == (False, True)
+
+
+def test_exit_still_sends_the_logoff_when_it_fails_but_shows_nothing_after(logger):
+    """The window is going away; a failed LOGOFF is logged by the worker, not
+    shown in a list nobody will read."""
     connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
     window, session, _, manager = build(logger, connection)
 
     window.on_close(FakeCloseEvent())
 
-    assert rows(manager) == [("SYSTEM", "Could not send LOGOFF to EDYY: timed out")]
+    assert rows(manager) == []
     assert session.is_logged_on() is False
 
 
@@ -138,16 +239,57 @@ def test_a_vetoed_exit_keeps_the_logon(logger, message_boxes):
     assert connection.sent == []
 
 
+def test_nothing_reaches_the_window_after_it_has_closed(logger):
+    window, _, _, manager = build(logger)
+    window.on_close(FakeCloseEvent())
+    before = len(manager.message_log)
+
+    window.cpdlc_session.request_weather("metar", "EGLL", lambda ok, text: manager.add_custom_message("late", "SYSTEM"))
+    window.worker.run_pending()
+
+    assert len(manager.message_log) == before
+
+
+def test_a_simulator_reconnect_in_flight_at_close_reaches_nobody(logger):
+    """on_close drains the worker with delivery switched off, so the reconnect
+    still runs but its callback never touches the closing window."""
+    window, session, _, _ = build(logger)
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window.simconnect_manager = simconnect
+    window._on_message_received(uplink("EDYY", 7, "CONTACT MARSEILLE CONTROL ON @133.325@."))
+    assert window.worker.pending() == 1
+    texts_before = list(window.status_texts)
+
+    window.on_close(FakeCloseEvent())
+
+    assert simconnect.connects == 1
+    assert simconnect.tuned == [133.325]
+    assert window.status_texts == texts_before
+
+
 # --- a rejected logon code ----------------------------------------------------
 
 
 def test_a_rejected_logon_code_forgets_the_dialogue(logger):
     window, session, _, _ = build(logger)
     session.handle_handover(STATION, "EDGG")
+    window._responses_in_flight[7] = "WILCO"
 
     window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
 
     assert dialogue(session) == ("", None, "", 1)
+    assert window.worker.generation == 1
+    assert window._responses_in_flight == {}
+
+
+def test_a_fatal_link_error_forgets_a_simulator_reconnect_that_was_out(logger):
+    window, _, _, _ = build(logger)
+    window._simconnect_reconnecting = True
+    window._pending_tune = 133.325
+
+    window._on_link_change(LinkState.DEGRADED, LinkState.FATAL, "invalid logon code")
+
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
 
 
 # --- an outage is not a disconnect --------------------------------------------
@@ -169,7 +311,7 @@ def test_a_lost_and_restored_link_keeps_the_logon(logger):
 class FakeConnectDialog:
     """Stands in for ConnectDialog: answers OK with fixed details, never shows."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, fetch_simbrief=None):
         pass
 
     def ShowModal(self):
@@ -183,19 +325,82 @@ class FakeConnectDialog:
 
 
 def test_connecting_hands_the_identity_to_the_session(logger, monkeypatch):
-    """A different callsign or network starts a clean dialogue; the session
-    decides, the window only passes both on."""
+    """The connect runs on the worker; the menu item is disabled until it
+    reports. A different callsign or network starts a clean dialogue; the
+    session decides, the window only passes both on."""
     monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
     window, session, connection, manager = build(logger)
 
     window.on_connect()
 
+    assert window.status_texts[-1] == "Connecting as BAW123..."
+    assert window.menu_item_connect.enabled is False
+    assert connection.connected_as is None
+
+    window.worker.run_pending()
+    window.worker.run_pending()
+
     assert connection.connected_as == ("BAW123", "sayintentions")
     assert (session.get_callsign(), session.network) == ("BAW123", "sayintentions")
     assert session.is_logged_on() is False
     assert window.polling_controller.started is True
-    assert window.status_texts == ["Connected as BAW123."]
+    assert window.menu_item_connect.enabled is True
+    assert window.status_texts[-1] == "Connected as BAW123."
     assert rows(manager) == [("SYSTEM", "Connected as BAW123")]
+    assert window.simconnect_manager.connects == 1
+
+
+def test_a_contact_during_the_first_simulator_handshake_waits_for_it(logger, monkeypatch):
+    """The post-connect handshake and a failed tune's reconnect must not run
+    two connects at once; the handshake's result sends the waiting frequency.
+
+    InlineWorker runs a job queued by another job's own callback within the
+    same run_pending() call (the queue is drained by one loop, and queueing
+    happens inside that loop's own iteration), so the real post-connect
+    handshake started by on_connect() has already finished, flag and all, by
+    the time control returns here. To still catch a CONTACT arriving *during*
+    a handshake, the handshake is retriggered directly through
+    _start_simconnect() -- the same entry point _on_connect_result uses --
+    which leaves a job queued but not yet run, and the CONTACT is delivered
+    against that.
+    """
+    monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
+    window, session, connection, _ = build(logger)
+    simconnect = FakeSimConnectManager(tune_results=[False, True])
+    window.simconnect_manager = simconnect
+    window.on_connect()
+    window.worker.run_pending()
+    session.handle_logon_accepted("EDYY")
+    connects_before = simconnect.connects
+
+    window._simconnect_reconnecting = False
+    window._start_simconnect()
+
+    window._on_message_received(uplink("EDYY", 7, "CONTACT MARSEILLE CONTROL ON @133.325@."))
+
+    assert window.worker.pending() == 1
+    assert simconnect.connects == connects_before
+
+    window.worker.run_pending()
+
+    assert simconnect.connects == connects_before + 1
+    assert simconnect.tuned == [133.325, 133.325]
+    assert (window._simconnect_reconnecting, window._pending_tune) == (False, None)
+
+
+def test_a_failed_connection_is_reported_and_the_menu_item_comes_back(logger, monkeypatch, message_boxes):
+    monkeypatch.setattr(mw, "ConnectDialog", FakeConnectDialog)
+    connection = FakeConnectionManager(connect_error=HoppieError("invalid logon code"))
+    window, session, connection, _ = build(logger, connection)
+
+    window.on_connect()
+    window.worker.run_pending()
+
+    assert message_boxes.captions == ["Error"]
+    assert "invalid logon code" in message_boxes.calls[0][0]
+    assert window.menu_item_connect.enabled is True
+    assert window.status_texts[-1] == "Not connected."
+    assert window.polling_controller.started is False
 
 
 # --- Requests > Logon ----------------------------------------------------------
@@ -224,7 +429,26 @@ def test_a_manual_logon_while_logged_on_echoes_the_logoff_it_sends(logger, monke
     window, session, connection, manager = build(logger)
 
     window.on_logon(None)
+    window.worker.run_pending()
 
     assert [frame[3] for frame in connection.sent] == ["LOGOFF", "REQUEST LOGON"]
     assert rows(manager) == [(CLIENT_CALLSIGN, "LOGOFF"), (CLIENT_CALLSIGN, "REQUEST LOGON")]
     assert window.status_texts[-1] == "Pending logon to EDGG."
+
+
+def test_a_failed_logoff_before_a_relogon_is_named_correctly(logger, monkeypatch, message_boxes):
+    """The LOGOFF to the old station and the REQUEST LOGON to the new one
+    report separately, each naming its own station and frame."""
+    monkeypatch.setattr(mw, "LogonDialog", FakeLogonDialog)
+    connection = FakeConnectionManager(raise_with=HoppieError("timed out"))
+    window, session, connection, _ = build(logger, connection)
+
+    window.on_logon(None)
+    window.worker.run_pending()
+
+    assert [call[0] for call in message_boxes.calls] == [
+        "Failed to send LOGOFF to EDYY: timed out. The logon to EDGG goes ahead.",
+        "Failed to send logon request to EDGG: timed out.",
+    ]
+    assert "Could not send LOGOFF to EDYY." in window.status_texts
+    assert window.status_texts[-1] == "Could not log on to EDGG."

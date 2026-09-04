@@ -64,11 +64,11 @@ def no_network(monkeypatch):
 def no_simbrief(monkeypatch):
     """Answer every SimBrief lookup with "no flight plan", recording the ids asked for.
 
-    The Connect and PDC dialogs import get_latest_ofp by name, so the patch
-    lands on each dialog module rather than on src.utils.simbrief.
+    MainWindow imports get_latest_ofp by name and runs it on the worker, so
+    the patch lands on the window module rather than on src.utils.simbrief.
 
     Returns:
-        list: The SimBrief user ids the dialogs asked for.
+        list: The SimBrief user ids the window asked for.
     """
     asked = []
 
@@ -76,8 +76,7 @@ def no_simbrief(monkeypatch):
         asked.append(user_id)
         return None
 
-    monkeypatch.setattr("src.gui.dialogs.connect_dialog.get_latest_ofp", fake)
-    monkeypatch.setattr("src.gui.dialogs.pdc_dialog.get_latest_ofp", fake)
+    monkeypatch.setattr("src.gui.main_window.get_latest_ofp", fake)
     return asked
 
 

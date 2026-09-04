@@ -13,7 +13,7 @@ from src.config import PREVIOUS_STATION_WINDOW_SECONDS
 from src.gui.main_window import MainWindow
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
-from tests.support import FakeClock, FakeConnectionManager, uplink
+from tests.support import FakeClock, FakeConnectionManager, inline_worker, uplink
 
 STATION = "LSAG"
 
@@ -29,7 +29,9 @@ class HeadlessMainWindow(MainWindow):
 
 @pytest.fixture
 def window(logger, wx_app):
-    session = CpdlcSession(logger, FakeConnectionManager(), clock=FakeClock())
+    session = CpdlcSession(
+        logger, FakeConnectionManager(), clock=FakeClock(), worker=inline_worker(logger)
+    )
     frame = HeadlessMainWindow(logger, session, MessageManager(logger))
     # PopupMenu runs a nested modal loop, which would hang the test; count
     # the menus that would have been shown instead.

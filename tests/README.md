@@ -20,17 +20,21 @@ session; CI runs them on Windows for that reason. Each test is limited to 60
 seconds.
 
 Shared test doubles (`uplink`, `FakeConnectionManager`, `FakeSimConnectManager`,
-`make_main_window`, `FakeClock`, `answerable`, ...) live in `support.py`; import them with
-`from tests.support import ...`.
+`make_main_window`, `FakeClock`, `answerable`, `inline_worker`, ...) live in `support.py`; import them with
+`from tests.support import ...`. Network work runs on a worker thread in the
+application; tests use `inline_worker()`, which has no thread, and call
+`run_pending()` to run what a handler queued. The few tests that build the real
+window start its worker thread and shut it down at teardown, and one worker test
+starts a thread on purpose.
 
 | File | Covers |
 | --- | --- |
-| `test_acknowledge_path.py` | Responding to an uplink, end to end from the window, down to the frame |
+| `test_acknowledge_path.py` | Responding to an uplink, end to end from the window, queued on the worker, down to the frame |
 | `test_config.py` | Reading, writing and clamping the configuration |
 | `test_connection_manager.py` | The network boundary: errors, timeouts, poll results, unreadable uplinks, the wire packets |
 | `test_cpdlc_session.py` | Session state: logon acceptance and rejection, the handover window, pending expiry, reset and identity |
-| `test_dialogs.py` | The validation the weather request dialog applies before submitting |
-| `test_downlink_requests.py` | The exact text of every downlink the client can send, and every send failure |
+| `test_dialogs.py` | The weather request dialog's validation; the Connect and PDC dialogs filling in from SimBrief |
+| `test_downlink_requests.py` | The exact text of every downlink the client can send, and every send failure, through the worker |
 | `test_error_reporting.py` | The last-resort exception reporter: one deferred dialog at a time |
 | `test_frequency_parser.py` | Which CONTACT/MONITOR texts tune the standby radio |
 | `test_harness.py` | The hermetic fixtures themselves |
@@ -42,11 +46,15 @@ Shared test doubles (`uplink`, `FakeConnectionManager`, `FakeSimConnectManager`,
 | `test_message_formatting.py` | Packet prefix stripping and the list and detail text |
 | `test_message_manager.py` | Message storage, addressing and the full response table |
 | `test_message_view.py` | The message list and its response context menu |
-| `test_polling_controller.py` | Poll intervals, the back-off ladder while the link is lost, batch delivery, the tick callback |
-| `test_session_lifecycle.py` | Where the dialogue ends: disconnect, exit, a rejected logon code; and that a lost link is not one |
+| `test_network_worker.py` | The network worker: ordering, generations, pacing, failure capture, shutdown |
+| `test_polling_controller.py` | Poll intervals, polls on the worker, the back-off ladder while the link is lost, batch delivery, the tick callback |
+| `test_session_lifecycle.py` | Connect, disconnect and exit through the worker; a rejected logon code; a lost link is not a disconnect |
+| `test_simconnect_manager.py` | The SimConnect tune path: no connecting on its own, the simulator's answer believed |
+| `test_update_checker.py` | The update check off the GUI thread, and the prompt that waits for open dialogs |
 | `test_uplink_handling.py` | HANDOVER, LOGOFF, LOGON REJECTED, protocol noise and auto-tune through the window, including the station that handed over |
-| `test_weather_monitor.py` | Weather change detection and the update timer lifecycle |
+| `test_weather_monitor.py` | Weather change detection, the update cycle on the worker, the timer lifecycle |
 | `test_weather_parsing.py` | The report registry, the ATIS letter and the report formatters |
+| `test_weather_requests.py` | The manual weather request through the window; the report or the error arrives from the worker |
 
 `test_downlink_requests.py` asserts message text literally, so a change to a
 format shows up there before it reaches the network.

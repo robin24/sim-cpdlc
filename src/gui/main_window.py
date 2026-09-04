@@ -1,24 +1,23 @@
 """Main window for the Sim-CPDLC application."""
 
+import functools
 import os
 import re
 import sys
+import webbrowser
+from contextlib import contextmanager
+
 import wx
 import wx.adv
 
-from hoppie_connector import (
-    CpdlcMessage,
-    CpdlcResponseRequirement as RR,
-    HoppieError,
-    HoppieMessage,
-)
+from hoppie_connector import CpdlcMessage
 
 from src.config import (
+    APP_VERSION,
     DEFAULT_POLL_INTERVAL,
     ACTIVE_POLL_INTERVAL,
     INACTIVITY_TIMEOUT,
     MESSAGE_SOUND_FILENAME,
-    RATE_LIMIT_RETRY_MS,
     weather_interval_minutes,
     load_config,
     save_config,
@@ -29,6 +28,7 @@ from src.model.message_manager import MessageManager
 from src.model.cpdlc_session import CpdlcSession
 from src.model.weather_monitor import WeatherMonitor
 from src.controller.polling_controller import PollingController
+from src.model.network_worker import NetworkWorker, PRIORITY_INFO, PRIORITY_LINK
 from src.controller.link_state import LinkState
 from src.gui.message_view import MessageView
 from src.gui.dialogs import (
@@ -46,6 +46,7 @@ from src.gui.dialogs import (
 )
 from src.utils.weather_parsing import report_type_label
 from src.utils.update_checker import UpdateChecker
+from src.utils.simbrief import get_latest_ofp
 from src.utils.simconnect_manager import SimConnectManager
 from src.utils.frequency_parser import extract_contact_frequency
 from src.gui.dialogs.settings_dialog import SettingsDialog
@@ -74,14 +75,21 @@ class MainWindow(wx.Frame):
         self.logger = logger
         self.logger.debug("Initializing MainWindow")
 
+        # How many modal dialogs are open. A prompt that arrives from the
+        # background (the update check) waits until this is zero, so it can
+        # never pop over, or close the app from under, a dialog in use.
+        self._modal_depth = 0
+        self.pending_update = None
+
+        # One thread for every network call, so the GUI thread never waits on
+        # the network and every result comes back through the event loop.
+        self.worker = NetworkWorker(logger)
+
         # Initialize model components
         self.connection_manager = ConnectionManager(logger)
         self.message_manager = MessageManager(logger)
-        self.cpdlc_session = CpdlcSession(logger, self.connection_manager)
+        self.cpdlc_session = CpdlcSession(logger, self.connection_manager, worker=self.worker)
         self.simconnect_manager = SimConnectManager()
-
-        # Check if this is the first launch (config file just created)
-        self._check_first_launch()
 
         # Initialize sound for new messages
         sound_path = self.resource_path(os.path.join("assets", MESSAGE_SOUND_FILENAME))
@@ -90,22 +98,32 @@ class MainWindow(wx.Frame):
         else:
             error_msg = f"Sound file not found at {sound_path}. The program will work as expected, however you will not hear a notification sound when a new CPDLC message arrives. To restore the notification sound, please quit the app and double-check that the sound file exists at the specified path."
             self.logger.warning(error_msg)
-            wx.MessageBox(error_msg, "Missing Sound File", wx.OK | wx.ICON_WARNING)
+            self._message_box(error_msg, "Missing Sound File", wx.OK | wx.ICON_WARNING)
             self.new_message_sound = None
 
         # Initialize UI
         self._init_ui()
 
         # Initialize update checker
-        self.update_checker = UpdateChecker(self, logger)
+        self.update_checker = UpdateChecker(logger, self.worker)
 
-        # Check for updates if enabled in settings
+        # Check for updates if enabled in settings. A run from source is a
+        # developer's checkout, not an installation to be told about releases.
         config = load_config()
-        if config.get("auto_check_updates", True):
-            self.logger.debug("Auto-update check enabled, checking for updates")
-            self.update_checker.check_for_updates()
-        else:
+        # Read once and refreshed by Settings, rather than from disk on every
+        # uplink.
+        self._auto_tune_com1 = config.get("auto_tune_com1", True)
+        # One simulator reconnect at a time; a CONTACT that arrives while it
+        # is out only updates the frequency the retry will send.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
+        if not config.get("auto_check_updates", True):
             self.logger.debug("Auto-update check disabled")
+        elif not getattr(sys, "frozen", False):
+            self.logger.debug("Running from source; skipping the automatic update check")
+        else:
+            self.logger.debug("Auto-update check enabled, checking for updates")
+            self.update_checker.check(self._on_auto_update_check)
 
         # Initialize controller
         self.polling_controller = PollingController(
@@ -118,10 +136,15 @@ class MainWindow(wx.Frame):
             link_callback=self._on_link_change,
             unreadable_callback=self._on_unreadable_messages,
             tick_callback=self._on_poll_tick,
+            worker=self.worker,
         )
-        # Handle of a scheduled acknowledgement retry, so a disconnect or a
-        # fatal teardown can cancel it before it fires against a dead link.
-        self._pending_retry = None
+        # message_id -> response text queued but not yet reported, so a second
+        # answer to the same uplink is refused until the first has gone out
+        # (or failed).
+        self._responses_in_flight = {}
+        # True while a connect or disconnect job is out; every handler that
+        # needs the connection refuses until it reports.
+        self._link_busy = False
         # Named once per episode; reset to False whenever the link recovers.
         self._callsign_clash_announced = False
 
@@ -133,10 +156,15 @@ class MainWindow(wx.Frame):
             self._on_weather_update,
             self._on_weather_error,
             interval_ms=interval_minutes * 60000,
+            worker=self.worker,
         )
 
         # Bind the close event to handle ALT+F4 and other direct close operations
         self.Bind(wx.EVT_CLOSE, self.on_close)
+
+        # The welcome prompt runs once the window is complete: its handlers
+        # are bound and the controllers exist (audit L-15).
+        self._check_first_launch()
 
         self.Show(True)
         self.logger.debug("MainWindow initialization complete")
@@ -269,7 +297,11 @@ class MainWindow(wx.Frame):
             current_auto_tune_com1,
             current_weather_interval,
         )
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                self.logger.debug("Settings dialog cancelled")
+                return
+
             # Get the new settings
             (
                 new_sayintentions_logon_code,
@@ -290,28 +322,26 @@ class MainWindow(wx.Frame):
             config["weather_update_interval"] = new_weather_interval
             self.weather_monitor.set_interval(new_weather_interval * 60000)
             if save_config(config):
+                self._auto_tune_com1 = new_auto_tune_com1
                 self.logger.info("Settings saved successfully")
-                wx.MessageBox(
+                self._message_box(
                     "Settings saved successfully. The new settings will be used for future operations.",
                     "Settings Saved",
                     wx.OK | wx.ICON_INFORMATION,
                 )
             else:
                 self.logger.error("Failed to save settings")
-                wx.MessageBox(
+                self._message_box(
                     "Failed to save settings. Please try again.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
-        else:
-            self.logger.debug("Settings dialog cancelled")
-
-        dlg.Destroy()
 
     def on_check_updates(self, _):
         """Manually check for updates."""
         self.logger.debug("Manually checking for updates")
-        self.update_checker.check_for_updates(auto_check=False)
+        self.SetStatusText("Checking for updates...")
+        self.update_checker.check(self._on_manual_update_check)
 
     def on_about(self, _):
         """Display information about the application."""
@@ -327,38 +357,72 @@ class MainWindow(wx.Frame):
             self.on_disconnect()
 
     def on_connect(self):
-        """Establish connection to the CPDLC network."""
+        """Ask for the connection details and connect on the worker."""
         self.logger.debug("Opening connection dialog")
-        dlg = ConnectDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        dlg = ConnectDialog(self, fetch_simbrief=self._fetch_simbrief)
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             callsign, logon_code, network_type = dlg.get_connection_details()
+            self._begin_connect(callsign, logon_code, network_type)
 
-            try:
-                self.connection_manager.connect(callsign, logon_code, network_type)
-            except HoppieError as exc:
-                wx.MessageBox(
-                    f"Connection failed: {exc}",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-            else:
-                # Start polling and automatic weather updates
-                self.polling_controller.start(self)
-                self.weather_monitor.start(self)
+    def _begin_connect(self, callsign, logon_code, network_type):
+        """Submit the connection attempt; the menu item stays disabled until it reports.
 
-                # Hand the identity to the session; a different callsign or
-                # network starts a clean dialogue, the same one keeps the logon
-                self.cpdlc_session.begin_session(callsign, network_type)
+        Args:
+            callsign: Aircraft callsign
+            logon_code: CPDLC logon code
+            network_type: "sayintentions" or "hoppie"
+        """
+        self.menu_item_connect.Enable(False)
+        self._link_busy = True
+        self.SetStatusText(f"Connecting as {callsign}...")
+        self.worker.submit(
+            "connect",
+            lambda: self.connection_manager.connect(callsign, logon_code, network_type),
+            functools.partial(self._on_connect_result, callsign, network_type),
+            PRIORITY_LINK,
+        )
 
-                # Update UI
-                self.SetStatusText(f"Connected as {callsign}.")
-                self.menu_item_connect.SetItemLabel("&Disconnect")
-                self.menu_item_connect.SetHelp("Disconnect from the CPDLC network")
+    def _on_connect_result(self, callsign, network_type, result):
+        """Finish a connection attempt. Runs on the GUI thread.
 
-                # Add system message
-                self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
+        Args:
+            callsign: The callsign the attempt was made with
+            network_type: The network it was made on
+            result: The worker's JobResult
+        """
+        self.menu_item_connect.Enable(True)
+        self._link_busy = False
+        if not result.ok:
+            self.SetStatusText("Not connected.")
+            self._message_box(
+                f"Connection failed: {result.error}",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
 
-        dlg.Destroy()
+        # Start polling and automatic weather updates
+        self.polling_controller.start(self)
+        self.weather_monitor.start(self)
+
+        # Hand the identity to the session; a different callsign or
+        # network starts a clean dialogue, the same one keeps the logon
+        self.cpdlc_session.begin_session(callsign, network_type)
+
+        # Update UI
+        self.SetStatusText(f"Connected as {callsign}.")
+        self.menu_item_connect.SetItemLabel("&Disconnect")
+        self.menu_item_connect.SetHelp("Disconnect from the CPDLC network")
+
+        # Add system message
+        self._add_custom_message(f"Connected as {callsign}", "SYSTEM")
+
+        # Reach the simulator now, off the GUI thread, so the first CONTACT
+        # does not pay for the connection.
+        self._start_simconnect()
 
     def on_disconnect(self):
         """Disconnect from the CPDLC network."""
@@ -377,7 +441,7 @@ class MainWindow(wx.Frame):
 
         # Confirm disconnect
         if (
-            wx.MessageBox(
+            self._message_box(
                 confirm_message,
                 "Confirm Disconnect",
                 wx.YES_NO | wx.ICON_QUESTION,
@@ -388,7 +452,9 @@ class MainWindow(wx.Frame):
             return
 
         self.logger.info("Disconnecting from CPDLC network")
-        self._cancel_pending_retry()
+        self.menu_item_connect.Enable(False)
+        self._link_busy = True
+        self.SetStatusText("Disconnecting...")
         self._end_dialogue()
 
         # Stop polling and automatic weather updates
@@ -396,10 +462,25 @@ class MainWindow(wx.Frame):
         self.weather_monitor.stop()
         self.weather_monitor.clear()
 
-        # Disconnect
-        self.connection_manager.disconnect()
+        # The LOGOFF queued by _end_dialogue runs at a higher priority than
+        # this, so the connection is only closed once it has gone out.
+        self.worker.submit(
+            "disconnect", self.connection_manager.disconnect, self._on_disconnected, PRIORITY_LINK
+        )
+
+    def _on_disconnected(self, result):
+        """Finish a disconnect once the LOGOFF has had its turn. Runs on the GUI thread.
+
+        Args:
+            result: The worker's JobResult (disconnect() cannot fail)
+        """
+        self._drop_session_work()
+        # Belt and braces: nothing queued during the disconnect may leave a dialogue behind.
+        self.cpdlc_session.reset()
 
         # Update UI
+        self.menu_item_connect.Enable(True)
+        self._link_busy = False
         self.menu_item_connect.SetItemLabel("&Connect")
         self.menu_item_connect.SetHelp("Connect to the CPDLC network")
         self.SetStatusText("Disconnected from CPDLC network.")
@@ -407,86 +488,103 @@ class MainWindow(wx.Frame):
         # Add system message
         self._add_custom_message("Disconnected from CPDLC network", "SYSTEM")
 
-    def _end_dialogue(self):
-        """Log off from the current station, if any, then forget the dialogue.
-
-        The session is reset whether or not the LOGOFF could be sent: after a
-        disconnect the app must not believe it is still logged on (audit M-1).
-        A LOGOFF that could not be sent gets a SYSTEM row, so the pilot knows
-        the station was not told.
-        """
-        if self.cpdlc_session.is_logged_on():
-            station = self.cpdlc_session.get_current_station()
-            success, message = self.cpdlc_session.logoff()
-            if success:
-                if message:
-                    self._add_custom_message(message)
-            else:
-                error_detail = f": {message}" if message else ""
-                self.logger.warning(f"Could not send LOGOFF to {station}{error_detail}")
-                self._add_custom_message(
-                    f"Could not send LOGOFF to {station}{error_detail}", "SYSTEM"
-                )
-
-        self.cpdlc_session.reset()
+    def _drop_session_work(self):
+        """Forget everything queued or in flight for the session that just ended."""
+        # Anything still queued belonged to the old session.
+        self.worker.new_generation()
+        # Their results were just dropped with the generation.
+        self._responses_in_flight.clear()
+        # A simulator reconnect still out reports into the dropped generation,
+        # so its callback never runs; forget it, or auto-tune stays wedged.
+        self._simconnect_reconnecting = False
+        self._pending_tune = None
 
     def on_logon(self, _):
         """Initiate logon to a CPDLC station."""
-        # Check if connected to the network
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to log on to a station.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("log on to a station"):
             return
 
         self.logger.debug("Opening logon dialog")
         dlg = LogonDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             station = dlg.get_logon_details()
 
             # Validate station name is exactly 4 characters
             if len(station) != 4:
-                wx.MessageBox(
+                self._message_box(
                     "Station name must be exactly 4 characters long.",
                     "Invalid Station Name",
                     wx.OK | wx.ICON_ERROR,
                 )
-                dlg.Destroy()
                 return
 
             previous = self.cpdlc_session.get_current_station()
-            success, message = self.cpdlc_session.logon(station)
-            if success:
-                if previous:
-                    # logon() sent LOGOFF to the previous station before the
-                    # request; the list is the transcript of what went out.
-                    self._add_custom_message("LOGOFF")
-
-                # Add custom message only if a message was returned from the session
-                if message:
-                    self._add_custom_message(message)
-
-                # Update UI to show pending logon status
-                self.SetStatusText(f"Pending logon to {station}.")
-
-                # Set active polling
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send logon request to {station}{error_detail}.",
+            self.SetStatusText(f"Logging on to {station}...")
+            queued = self.cpdlc_session.logon(
+                station,
+                functools.partial(self._on_logon_frame, station),
+                on_logoff_done=functools.partial(
+                    self._on_prelogon_logoff, previous, station
+                ),
+            )
+            if not queued:
+                self._message_box(
+                    f"Failed to send logon request to {station}.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
 
-        dlg.Destroy()
+    def _on_logon_frame(self, station, success, text_or_error):
+        """Report the REQUEST LOGON of a manual logon. Runs on the GUI thread.
+
+        Args:
+            station: The station being logged on to
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+        """
+        if success:
+            self._add_custom_message(text_or_error)
+            self.polling_controller.set_active_polling()
+            self.SetStatusText(f"Pending logon to {station}.")
+            return
+
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.SetStatusText(f"Could not log on to {station}.")
+        self._message_box(
+            f"Failed to send logon request to {station}{error_detail}.",
+            "Error",
+            wx.OK | wx.ICON_ERROR,
+        )
+
+    def _on_prelogon_logoff(self, previous, station, success, text_or_error):
+        """Report the LOGOFF that a logon while logged on sends first. Runs on the GUI thread.
+
+        Args:
+            previous: The station the LOGOFF went to
+            station: The station being logged on to next
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+        """
+        if success:
+            self._add_custom_message(text_or_error)
+            return
+
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.logger.warning(f"Could not send LOGOFF to {previous}{error_detail}")
+        self.SetStatusText(f"Could not send LOGOFF to {previous}.")
+        self._message_box(
+            f"Failed to send LOGOFF to {previous}{error_detail}. The logon to {station} goes ahead.",
+            "Error",
+            wx.OK | wx.ICON_ERROR,
+        )
 
     def on_logoff(self, _):
         """Initiate logoff from current CPDLC station."""
         if not self.cpdlc_session.is_logged_on():
-            wx.MessageBox(
+            self._message_box(
                 "You are not currently logged on to any station.",
                 "Not Logged On",
                 wx.OK | wx.ICON_INFORMATION,
@@ -496,7 +594,7 @@ class MainWindow(wx.Frame):
         # Confirm logoff
         station = self.cpdlc_session.get_current_station()
         if (
-            wx.MessageBox(
+            self._message_box(
                 f"Are you sure you want to log off from {station}?",
                 "Confirm Logoff",
                 wx.YES_NO | wx.ICON_QUESTION,
@@ -506,37 +604,68 @@ class MainWindow(wx.Frame):
             self.logger.debug("Logoff cancelled by user")
             return
 
-        success, message = self.cpdlc_session.logoff()
+        self.SetStatusText(f"Sending LOGOFF to {station}...")
+        if not self.cpdlc_session.logoff(functools.partial(self._on_logoff_frame, station)):
+            self._message_box(
+                f"Failed to send logoff message to {station}.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+
+    def _on_logoff_frame(self, station, success, text_or_error, quiet=False):
+        """Report the outcome of a LOGOFF. Runs on the GUI thread.
+
+        Args:
+            station: The station the LOGOFF went to
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+            quiet: True on disconnect and exit, where a failure gets a SYSTEM
+                row rather than a dialog and the status bar is left alone
+        """
         if success:
-            if message:
-                self._add_custom_message(message)
+            self._add_custom_message(text_or_error)
+            if not quiet:
+                self.SetStatusText(f"Logged off from {station}.")
+            return
 
-            # Update UI
-            self.SetStatusText(f"Logged off from {station}.")
-
-            # Set active polling
-            self.polling_controller.set_active_polling()
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.logger.warning(f"Could not send LOGOFF to {station}{error_detail}")
+        if quiet:
+            self._add_custom_message(
+                f"Could not send LOGOFF to {station}{error_detail}", "SYSTEM"
+            )
         else:
-            error_detail = f": {message}" if message else ""
-            wx.MessageBox(
+            self.SetStatusText(f"Could not send LOGOFF to {station}.")
+            self._message_box(
                 f"Failed to send logoff message to {station}{error_detail}.",
                 "Error",
                 wx.OK | wx.ICON_ERROR,
             )
 
+    def _end_dialogue(self):
+        """Queue the LOGOFF for the current station, if any, then forget the dialogue.
+
+        The session is reset at once, whether or not the LOGOFF gets through:
+        after a disconnect the app must not believe it is still logged on
+        (audit M-1). A LOGOFF that could not be sent gets a SYSTEM row when
+        its result comes back, so the pilot knows the station was not told.
+        """
+        if self.cpdlc_session.is_logged_on():
+            station = self.cpdlc_session.get_current_station()
+            self.cpdlc_session.logoff(
+                functools.partial(self._on_logoff_frame, station, quiet=True)
+            )
+
+        self.cpdlc_session.reset()
+
     def on_altitude_change(self, _):
         """Send altitude change request to current station."""
         # Check if connected and logged on
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to request an altitude change.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("request an altitude change"):
             return
 
         if not self.cpdlc_session.is_logged_on():
-            wx.MessageBox(
+            self._message_box(
                 "You must be logged on to a station to request an altitude change.",
                 "Not Logged On",
                 wx.OK | wx.ICON_INFORMATION,
@@ -545,40 +674,26 @@ class MainWindow(wx.Frame):
 
         self.logger.debug("Opening altitude change dialog")
         dlg = AltitudeChangeDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             altitude, reason = dlg.get_altitude_details()
 
-            success, message = self.cpdlc_session.send_altitude_change_request(
-                altitude, reason
-            )
-            if success:
-                if message:
-                    self._add_custom_message(message)
-
-                # Set active polling
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send altitude change request{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+            what = "altitude change request"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_altitude_change_request(
+                altitude, reason, self._send_callback(what)
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def on_direct_request(self, _):
         """Send a direct-to waypoint request."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
-            wx.MessageBox(
+            self._message_box(
                 "You must be logged on to a station to send a request.",
                 "Not Logged On",
                 wx.OK | wx.ICON_INFORMATION,
@@ -586,36 +701,26 @@ class MainWindow(wx.Frame):
             return
 
         dlg = DirectRequestDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             fix, reason = dlg.get_direct_details()
 
-            success, message = self.cpdlc_session.send_direct_request(fix, reason)
-            if success:
-                if message:
-                    self._add_custom_message(message)
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send direct request{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+            what = "direct request"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_direct_request(
+                fix, reason, self._send_callback(what)
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def on_speed_request(self, _):
         """Send a speed/Mach change request."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
-            wx.MessageBox(
+            self._message_box(
                 "You must be logged on to a station to send a request.",
                 "Not Logged On",
                 wx.OK | wx.ICON_INFORMATION,
@@ -623,38 +728,26 @@ class MainWindow(wx.Frame):
             return
 
         dlg = SpeedRequestDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             speed, is_mach, reason = dlg.get_speed_details()
 
-            success, message = self.cpdlc_session.send_speed_request(
-                speed, is_mach, reason
-            )
-            if success:
-                if message:
-                    self._add_custom_message(message)
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send speed request{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+            what = "speed request"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_speed_request(
+                speed, is_mach, reason, self._send_callback(what)
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def on_when_can_we_expect(self, _):
         """Send a when-can-we-expect inquiry."""
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a request.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a request"):
             return
 
         if not self.cpdlc_session.is_logged_on():
-            wx.MessageBox(
+            self._message_box(
                 "You must be logged on to a station to send a request.",
                 "Not Logged On",
                 wx.OK | wx.ICON_INFORMATION,
@@ -662,23 +755,18 @@ class MainWindow(wx.Frame):
             return
 
         dlg = WhenCanWeDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             message_text = dlg.get_message_text()
 
-            success, message = self.cpdlc_session.send_when_can_we_expect(message_text)
-            if success:
-                if message:
-                    self._add_custom_message(message)
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send request{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+            what = "request"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_when_can_we_expect(
+                message_text, self._send_callback(what)
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def get_current_station(self):
         """Get the current station from the CPDLC session.
@@ -695,34 +783,23 @@ class MainWindow(wx.Frame):
     def on_telex(self, _):
         """Send a telex message to specified recipient."""
         # Check if connected to the network
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to send a telex message.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("send a telex message"):
             return
 
         self.logger.debug("Opening telex dialog")
         dlg = TelexDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             recipient, message = dlg.get_telex_details()
 
-            success, returned_message = self.cpdlc_session.send_telex(
-                recipient, message
-            )
-            if success:
-                if returned_message:
-                    self._add_custom_message(returned_message)
-            else:
-                error_detail = f": {returned_message}" if returned_message else ""
-                wx.MessageBox(
-                    f"Failed to send telex message to {recipient}{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+            what = f"telex message to {recipient}"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_telex(
+                recipient, message, self._send_callback(what)
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def _require_connection(self, action):
         """Check we are connected, telling the user if we are not.
@@ -733,15 +810,173 @@ class MainWindow(wx.Frame):
         Returns:
             bool: True if connected
         """
-        if self.connection_manager.is_connected():
+        if self.connection_manager.is_connected() and not self._link_busy:
             return True
 
-        wx.MessageBox(
+        self._message_box(
             f"You must be connected to the CPDLC network to {action}.",
             "Not Connected",
             wx.OK | wx.ICON_INFORMATION,
         )
         return False
+
+    @contextmanager
+    def _show_dialog(self, dlg):
+        """Show a dialog modally, count it as open, and destroy it afterwards.
+
+        Args:
+            dlg: The dialog to show
+
+        Yields:
+            The ShowModal() return code
+        """
+        self._modal_depth += 1
+        try:
+            yield dlg.ShowModal()
+        finally:
+            self._modal_depth -= 1
+            dlg.Destroy()
+            self._flush_deferred()
+
+    def _message_box(self, message, caption, style=wx.OK):
+        """wx.MessageBox parented to this window and counted as an open dialog."""
+        self._modal_depth += 1
+        try:
+            return wx.MessageBox(message, caption, style, parent=self)
+        finally:
+            self._modal_depth -= 1
+            self._flush_deferred()
+
+    def _flush_deferred(self):
+        """Show what waited for the dialogs to close: the update prompt, if any."""
+        if self._modal_depth or self.pending_update is None:
+            return
+
+        outcome, self.pending_update = self.pending_update, None
+        answer = self._message_box(
+            "A new version of Sim-CPDLC is available!\n\n"
+            f"Current version: {APP_VERSION}\n"
+            f"Latest version: {outcome.latest}\n\n"
+            "Open the release page in your browser?",
+            "Update Available",
+            wx.YES_NO | wx.ICON_INFORMATION,
+        )
+        if answer == wx.YES:
+            self._open_release_page(outcome.url)
+
+    def _open_release_page(self, url):
+        """Open the release page in the browser; the app stays open either way."""
+        self.logger.info(f"Opening the release page: {url}")
+        try:
+            webbrowser.open(url)
+        except Exception as exc:
+            self.logger.error(f"Error opening browser: {exc}")
+            self._message_box(
+                f"Error opening browser: {exc}\n\n"
+                f"Please visit {url} manually to download the update.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+
+    def _on_auto_update_check(self, outcome):
+        """Queue the prompt for a newer release; say nothing otherwise."""
+        if outcome.newer:
+            self.pending_update = outcome
+            self._flush_deferred()
+
+    def _on_manual_update_check(self, outcome):
+        """Report the outcome of a check the pilot asked for."""
+        if outcome.newer:
+            self.SetStatusText(f"Version {outcome.latest} is available.")
+            self.pending_update = outcome
+            self._flush_deferred()
+        elif outcome.latest:
+            self.SetStatusText(f"You are running the latest version ({APP_VERSION}).")
+            self._message_box(
+                f"You are running the latest version ({APP_VERSION}).",
+                "No Updates Available",
+                wx.OK | wx.ICON_INFORMATION,
+            )
+        else:
+            self.SetStatusText("Update check failed.")
+            self._message_box(
+                "Could not retrieve version information from GitHub.",
+                "Update Check Failed",
+                wx.OK | wx.ICON_ERROR,
+            )
+
+    def _fetch_simbrief(self, on_done):
+        """Fetch the latest SimBrief flight plan on the worker.
+
+        Args:
+            on_done: Callable(ofp_or_None), run on the GUI thread
+
+        Returns:
+            bool: True if a fetch was started, False when no SimBrief user id
+                is configured
+        """
+        user_id = load_config().get("simbrief_userid", "")
+        if not user_id:
+            return False
+
+        self.logger.debug(f"Fetching SimBrief OFP for user ID: {user_id}")
+        self.worker.submit(
+            "simbrief",
+            lambda: get_latest_ofp(user_id),
+            lambda result: on_done(result.value if result.ok else None),
+            PRIORITY_INFO,
+        )
+        return True
+
+    def _connect_simconnect(self, on_done=None):
+        """Connect to the simulator on a thread of its own.
+
+        SimConnect's connect can block without a timeout when the simulator is
+        slow to answer, so it must not sit in the network queue.
+
+        Args:
+            on_done: Callable(JobResult) run on the GUI thread; the result's
+                value is connect()'s answer
+        """
+        self.worker.run_detached("simconnect", self.simconnect_manager.connect, on_done)
+
+    def _start_simconnect(self):
+        """Connect to the simulator once, off the GUI thread.
+
+        One connect is out at a time: a second request while it runs only
+        waits for it, and _on_simconnect_connected sends any frequency that
+        arrived in the meantime.
+        """
+        if self._simconnect_reconnecting:
+            return
+        self._simconnect_reconnecting = True
+        self._connect_simconnect(self._on_simconnect_connected)
+
+    def _send_callback(self, what):
+        """Build the on_done for a downlink: echo it and speed up polling, or
+        say why it failed.
+
+        Args:
+            what: The request as the failure dialog names it, e.g.
+                "altitude change request"
+        """
+
+        def done(success, text_or_error):
+            if success:
+                self._add_custom_message(text_or_error)
+                self.SetStatusText(f"Sent {text_or_error}.")
+                self.polling_controller.set_active_polling()
+                return
+
+            error_detail = f": {text_or_error}" if text_or_error else ""
+            self.SetStatusText(f"Could not send {what}.")
+            self._message_box(
+                f"Failed to send {what}{error_detail}.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+
+        return done
 
     def on_weather_request(self, _):
         """Request a METAR, TAF or ATIS, optionally keeping it up to date."""
@@ -752,7 +987,10 @@ class MainWindow(wx.Frame):
 
         dlg = WeatherDialog(self, is_watched=self._is_weather_watched)
 
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             icao, info_type, auto_update = dlg.get_weather_details()
 
             label = report_type_label(info_type)
@@ -766,32 +1004,58 @@ class MainWindow(wx.Frame):
                     f"Stopped automatic updates for {label} {icao}", "SYSTEM"
                 )
 
-            success, result = self.cpdlc_session.request_weather(info_type, icao)
-
-            if success:
-                self._add_weather_message(result, icao, info_type)
-
-                # Only start watching a report we know we can actually fetch.
-                if auto_update:
-                    self.weather_monitor.subscribe(icao, info_type, initial_text=result)
-                    if not was_watched:
-                        self._add_custom_message(
-                            f"Now watching {label} {icao} for changes", "SYSTEM"
-                        )
-            else:
-                error_detail = f": {result}" if result else ""
-                wx.MessageBox(
-                    f"Failed to retrieve {label} for {icao}{error_detail}.",
+            self.SetStatusText(f"Requesting {label} for {icao}...")
+            queued = self.cpdlc_session.request_weather(
+                info_type,
+                icao,
+                lambda success, result: self._on_weather_requested(
+                    success, result, icao, info_type, auto_update, was_watched
+                ),
+            )
+            if not queued:
+                self._message_box(
+                    f"Failed to retrieve {label} for {icao}: not connected.",
                     "Error",
                     wx.OK | wx.ICON_ERROR,
                 )
 
-        dlg.Destroy()
+    def _on_weather_requested(self, success, result, icao, info_type, auto_update, was_watched):
+        """Show a requested report, or say why it did not come. Runs on the GUI thread.
+
+        Args:
+            success: Whether the report arrived
+            result: The report text, or the error text
+            icao: Airport ICAO code
+            info_type: Report type key
+            auto_update: Whether the pilot asked to keep the report updated
+            was_watched: Whether it was already being watched when asked
+        """
+        label = report_type_label(info_type)
+        if not success:
+            error_detail = f": {result}" if result else ""
+            self.SetStatusText(f"Could not retrieve {label} for {icao}.")
+            self._message_box(
+                f"Failed to retrieve {label} for {icao}{error_detail}.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        self._add_weather_message(result, icao, info_type)
+        self.SetStatusText(f"{label} for {icao} received.")
+
+        # Only start watching a report we know we can actually fetch.
+        if auto_update:
+            self.weather_monitor.subscribe(icao, info_type, initial_text=result)
+            if not was_watched:
+                self._add_custom_message(
+                    f"Now watching {label} {icao} for changes", "SYSTEM"
+                )
 
     def on_weather_subscriptions(self, _):
         """Show and manage the reports being kept up to date."""
         if self.weather_monitor.count() == 0:
-            wx.MessageBox(
+            self._message_box(
                 "No reports are being kept up to date. Check "
                 "'Keep this report updated automatically' when you request a "
                 "METAR, TAF or ATIS to start watching one.",
@@ -800,9 +1064,8 @@ class MainWindow(wx.Frame):
             )
             return
 
-        dlg = WeatherSubscriptionsDialog(self, self.weather_monitor)
-        dlg.ShowModal()
-        dlg.Destroy()
+        with self._show_dialog(WeatherSubscriptionsDialog(self, self.weather_monitor)):
+            pass
 
     def _on_weather_update(self, subscription, text, description):
         """Announce a weather report that has changed.
@@ -837,16 +1100,6 @@ class MainWindow(wx.Frame):
         every tick short.
         """
         wx.CallAfter(callback, *args, **kwargs)
-
-    def _retry_later(self, delay_ms, callback, *args):
-        """Run a callback once after a delay, on the event loop."""
-        self._pending_retry = wx.CallLater(delay_ms, callback, *args)
-
-    def _cancel_pending_retry(self):
-        """Drop a scheduled acknowledgement retry; the link it needed is gone."""
-        if self._pending_retry is not None:
-            self._pending_retry.Stop()
-            self._pending_retry = None
 
     def _on_link_change(self, old_state, new_state, reason):
         """Announce the link transitions the status bar alone would hide.
@@ -899,8 +1152,9 @@ class MainWindow(wx.Frame):
             reason: The server's reason text
         """
         self.logger.error(f"Disconnecting after a fatal link error: {reason}")
-        self._cancel_pending_retry()
         self.polling_controller.stop()
+        # Nothing queued for this session may run or report now.
+        self._drop_session_work()
         self.weather_monitor.stop()
         self.weather_monitor.clear()
         self.connection_manager.disconnect()
@@ -912,7 +1166,7 @@ class MainWindow(wx.Frame):
             "Disconnected: the server rejected the logon code", "SYSTEM", play_sound=True
         )
         self._defer(
-            wx.MessageBox,
+            self._message_box,
             "The server rejected the logon code. Check it under File > Settings, "
             "then connect again.",
             "Logon Code Rejected",
@@ -946,17 +1200,15 @@ class MainWindow(wx.Frame):
     def on_pdc_request(self, _):
         """Request a pre-departure clearance from departure airport."""
         # Check if connected to the network
-        if not self.connection_manager.is_connected():
-            wx.MessageBox(
-                "You must be connected to the CPDLC network to request a PDC.",
-                "Not Connected",
-                wx.OK | wx.ICON_INFORMATION,
-            )
+        if not self._require_connection("request a PDC"):
             return
 
         self.logger.debug("Opening PDC request dialog")
-        dlg = PDCDialog(self)
-        if dlg.ShowModal() == wx.ID_OK:
+        dlg = PDCDialog(self, fetch_simbrief=self._fetch_simbrief)
+        with self._show_dialog(dlg) as answer:
+            if answer != wx.ID_OK:
+                return
+
             (
                 origin_icao,
                 destination_icao,
@@ -965,28 +1217,17 @@ class MainWindow(wx.Frame):
                 atis_code,
             ) = dlg.get_pdc_details()
 
-            success, message = self.cpdlc_session.send_pdc_request(
+            what = f"PDC request to {origin_icao}"
+            self.SetStatusText(f"Sending {what}...")
+            if not self.cpdlc_session.send_pdc_request(
                 origin_icao,
                 destination_icao,
                 aircraft_code,
                 stand_designator,
                 atis_code,
-            )
-            if success:
-                if message:
-                    self._add_custom_message(message)
-
-                # Set active polling
-                self.polling_controller.set_active_polling()
-            else:
-                error_detail = f": {message}" if message else ""
-                wx.MessageBox(
-                    f"Failed to send PDC request to {origin_icao}{error_detail}.",
-                    "Error",
-                    wx.OK | wx.ICON_ERROR,
-                )
-
-        dlg.Destroy()
+                self._send_callback(what),
+            ):
+                self._message_box(f"Failed to send {what}.", "Error", wx.OK | wx.ICON_ERROR)
 
     def _add_weather_message(self, text, icao, info_type, play_sound=False):
         """Add a weather report to the message list.
@@ -1147,21 +1388,37 @@ class MainWindow(wx.Frame):
         self.SetStatusText(f"Logged off from {sender}.")
         self._add_custom_message(f"Logging on to {new_station}", "SYSTEM")
 
-        success, message = self.cpdlc_session.handle_handover(sender, new_station)
+        queued = self.cpdlc_session.handle_handover(
+            sender, new_station, functools.partial(self._on_handover_logon, new_station)
+        )
+        if not queued:
+            self.logger.error(f"Failed to send logon request to {new_station} during handover")
+            self._add_custom_message(
+                f"Failed to logon to {new_station} during handover", "SYSTEM"
+            )
+
+    def _on_handover_logon(self, new_station, success, text_or_error):
+        """Report the REQUEST LOGON a handover sent. Runs on the GUI thread.
+
+        Args:
+            new_station: The station being logged on to
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+        """
         if success:
-            if message:
-                self._add_custom_message(message)
+            self._add_custom_message(text_or_error)
             self.SetStatusText(f"Pending logon to {new_station}.")
             self.polling_controller.set_active_polling()
-        else:
-            error_detail = f": {message}" if message else ""
-            self.logger.error(
-                f"Failed to send logon request to {new_station} during handover{error_detail}"
-            )
-            self._add_custom_message(
-                f"Failed to logon to {new_station} during handover{error_detail}",
-                "SYSTEM",
-            )
+            return
+
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.logger.error(
+            f"Failed to send logon request to {new_station} during handover{error_detail}"
+        )
+        self._add_custom_message(
+            f"Failed to logon to {new_station} during handover{error_detail}",
+            "SYSTEM",
+        )
 
     def _auto_tune(self, text):
         """Put a CONTACT/MONITOR frequency into the COM1 standby, if enabled.
@@ -1169,8 +1426,7 @@ class MainWindow(wx.Frame):
         Args:
             text: The uplink's element text as returned by _protocol_text
         """
-        config = load_config()
-        if not config.get("auto_tune_com1", True):
+        if not self._auto_tune_com1:
             return
 
         freq = extract_contact_frequency(text)
@@ -1180,19 +1436,44 @@ class MainWindow(wx.Frame):
         self.logger.info(f"CONTACT/MONITOR frequency detected: {freq:.3f} MHz")
         if self.simconnect_manager.set_com1_standby_mhz(freq):
             self.logger.info(f"COM1 standby set to {freq:.3f} MHz")
-        else:
-            self.logger.warning("Could not set COM1 standby (SimConnect unavailable)")
-            self.SetStatusText(f"Auto-tune failed \u2014 set {freq:.3f} manually")
+            return
 
-    def _on_acknowledge_message(self, message_id: int, response: str, retried=False):
-        """Handle message acknowledgement.
+        # Not connected, or the simulator has gone away since: reconnect once,
+        # off the GUI thread, and send the latest frequency again. A second
+        # CONTACT while the reconnect is out just replaces that frequency.
+        self._pending_tune = freq
+        if self._simconnect_reconnecting:
+            return
+        self.simconnect_manager.disconnect()
+        self._start_simconnect()
+
+    def _on_simconnect_connected(self, result):
+        """Runs after every simulator connect, initial or retry. Runs on the GUI thread.
+
+        Only tunes when a CONTACT is waiting: the initial post-connect
+        handshake usually finds nothing to send.
+
+        Args:
+            result: The connect's JobResult; its value is connect()'s answer
+        """
+        self._simconnect_reconnecting = False
+        freq, self._pending_tune = self._pending_tune, None
+        if freq is None:
+            return
+
+        if result.ok and result.value and self.simconnect_manager.set_com1_standby_mhz(freq):
+            self.logger.info(f"COM1 standby set to {freq:.3f} MHz after reconnecting")
+            return
+
+        self.logger.warning("Could not set COM1 standby (SimConnect unavailable)")
+        self.SetStatusText(f"Auto-tune failed \u2014 set {freq:.3f} manually")
+
+    def _on_acknowledge_message(self, message_id: int, response: str):
+        """Queue a response to an uplink.
 
         Args:
             message_id: The ID of the message being acknowledged
             response: The response text
-            retried: True when this is the automatic second attempt after a
-                rate_limit answer, which is not retried again. A retry is
-                dropped if the message was answered for good in the meantime.
         """
         addressing = self.message_manager.get_cpdlc_addressing(message_id)
         if addressing is None:
@@ -1202,52 +1483,58 @@ class MainWindow(wx.Frame):
 
         sender, min_value = addressing
 
-        if retried and self.message_manager.is_acknowledged(message_id):
-            # The pilot answered this message another way while the retry was
-            # pending; sending the stale response now would contradict it.
+        pending = self._responses_in_flight.get(message_id)
+        if pending is not None:
             self.logger.info(
-                f"Delayed {response} for message ID {message_id} not sent: already answered"
+                f"{response} for message ID {message_id} not queued: {pending} is already on its way"
             )
-            self.SetStatusText(f"Delayed {response} not sent: the message was already answered.")
+            self.SetStatusText(f"{response} not sent: {pending} is already on its way for this message.")
             return
 
-        if retried and not self.connection_manager.is_connected():
-            self.logger.info(f"Delayed {response} for message ID {message_id} not sent: disconnected")
-            self.SetStatusText(f"Delayed {response} not sent: not connected.")
-            return
-
-        success, returned_message = self.cpdlc_session.send_acknowledgement(
-            sender, min_value, response
+        self.SetStatusText(f"Sending {response}...")
+        # Claim the message before queueing, and give it back if the send was
+        # refused; _on_acknowledgement_sent releases it once the frame reports.
+        self._responses_in_flight[message_id] = response
+        queued = self.cpdlc_session.send_acknowledgement(
+            sender,
+            min_value,
+            response,
+            functools.partial(self._on_acknowledgement_sent, message_id, response),
         )
+        if not queued:
+            self._responses_in_flight.pop(message_id, None)
+            self._message_box(
+                "Failed to send acknowledgement: not connected.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+
+    def _on_acknowledgement_sent(self, message_id, response, success, text_or_error):
+        """Retire and echo a response once it has gone out. Runs on the GUI thread.
+
+        Args:
+            message_id: The ID of the message that was answered
+            response: The response text
+            success: Whether the frame went out
+            text_or_error: The frame text, or the error text
+        """
+        self._responses_in_flight.pop(message_id, None)
         if success:
             # MessageManager decides whether this response retires the message;
             # STANDBY is sent but leaves it answerable.
             self.message_manager.mark_acknowledged(message_id, response)
-
-            # Add custom message only if a message was returned from the session
-            if returned_message:
-                self._add_custom_message(returned_message)
-
-            # Set active polling
+            self._add_custom_message(text_or_error)
+            self.SetStatusText(f"Sent {response}.")
             self.polling_controller.set_active_polling()
-        elif not retried and returned_message and "rate_limit" in returned_message.lower():
-            # SayIntentions refuses a second message sent within a few seconds
-            # of the first. One automatic retry covers the common case of two
-            # quick acknowledgements; a second refusal is reported like any
-            # other failure.
-            seconds = RATE_LIMIT_RETRY_MS // 1000
-            self.logger.warning(f"Rate limited sending {response}; retrying in {seconds} s")
-            self.SetStatusText(f"Rate limited - retrying {response} in {seconds} s")
-            self._retry_later(
-                RATE_LIMIT_RETRY_MS, self._on_acknowledge_message, message_id, response, True
-            )
-        else:
-            error_detail = f": {returned_message}" if returned_message else ""
-            wx.MessageBox(
-                f"Failed to send acknowledgement{error_detail}.",
-                "Error",
-                wx.OK | wx.ICON_ERROR,
-            )
+            return
+
+        error_detail = f": {text_or_error}" if text_or_error else ""
+        self.SetStatusText(f"Could not send {response}.")
+        self._message_box(
+            f"Failed to send acknowledgement{error_detail}.",
+            "Error",
+            wx.OK | wx.ICON_ERROR,
+        )
 
     def _play_message_sound(self):
         """Play sound notification for new messages."""
@@ -1259,18 +1546,20 @@ class MainWindow(wx.Frame):
         """Handle application close event and perform cleanup."""
         self.logger.info("Application close event triggered")
 
-        # If connected, show confirmation dialog
         if self.connection_manager.is_connected():
-            if not self._confirm_exit(event):
+            # A forced close (Windows ending the session) cannot be vetoed, so
+            # there is nothing to ask.
+            if event.CanVeto() and not self._confirm_exit(event):
                 return
 
             self.logger.info("Exit confirmed, performing clean disconnect")
-            self._cancel_pending_retry()
             self._end_dialogue()
-
-            # Stop polling
             self.polling_controller.stop()
 
+        # Let the LOGOFF just queued go out, then stop delivering results to a
+        # window that is about to be gone. A job stuck in a network call is
+        # abandoned after the timeout.
+        self.worker.shutdown(timeout=5)
         self.weather_monitor.shutdown()
         self.simconnect_manager.disconnect()
         self.logger.info("Application shutting down")
@@ -1291,7 +1580,7 @@ class MainWindow(wx.Frame):
 
         # Show confirmation dialog
         if (
-            wx.MessageBox(
+            self._message_box(
                 confirm_message,
                 "Confirm Exit",
                 wx.YES_NO | wx.ICON_QUESTION,
@@ -1331,16 +1620,14 @@ class MainWindow(wx.Frame):
                 wx.YES_NO | wx.ICON_INFORMATION,
             )
 
-            result = dlg.ShowModal()
-            dlg.Destroy()
-
-            if result == wx.ID_YES:
-                self.logger.debug("User chose to set up settings on first launch")
-                # Open the settings dialog
-                wx.CallAfter(self.on_settings, None)
-            else:
-                self.logger.debug("User chose not to set up settings on first launch")
-                # Continue with normal UI presentation
+            with self._show_dialog(dlg) as result:
+                if result == wx.ID_YES:
+                    self.logger.debug("User chose to set up settings on first launch")
+                    # Open the settings dialog
+                    wx.CallAfter(self.on_settings, None)
+                else:
+                    self.logger.debug("User chose not to set up settings on first launch")
+                    # Continue with normal UI presentation
 
     def on_exit(self, _):
         """Handle exit menu selection by closing the window."""

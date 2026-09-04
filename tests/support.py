@@ -6,10 +6,12 @@ These are helpers, not fixtures: import them explicitly with
 
 import wx
 
-from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR
+from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR, HoppieError
 
-from src.config import DEFAULT_CONFIG, save_config
+from src.config import DEFAULT_CONFIG, load_config, save_config
 from src.model.connection_manager import PollResult
+from src.model.network_worker import NetworkWorker
+from src.utils.update_checker import UpdateChecker
 
 CLIENT_CALLSIGN = "DLH123"
 
@@ -39,6 +41,48 @@ def answerable(*stations):
     return lambda sender: sender in stations
 
 
+class InlineWorker(NetworkWorker):
+    """A NetworkWorker with no thread, for tests.
+
+    Jobs run when the test calls run_pending(), on the test's own thread, and
+    each result is handed straight to its callback. A callback that raises is
+    re-raised once the queue has drained: in the application wx.CallAfter
+    only schedules the callback, so its exception surfaces later in the event
+    loop rather than inside the worker, and a test must see it the same way.
+    Pacing is simulated on a FakeClock, so no test waits on a real sleep.
+    """
+
+    def __init__(self, logger):
+        self.errors = []
+        self.clock = FakeClock()
+        super().__init__(
+            logger,
+            dispatch=self._dispatch_inline,
+            start_thread=False,
+            clock=self.clock,
+            sleep=self.clock.advance,
+        )
+
+    def _dispatch_inline(self, fn, *args):
+        try:
+            fn(*args)
+        except Exception as exc:
+            self.errors.append(exc)
+            raise
+
+    def run_pending(self):
+        super().run_pending()
+        if self.errors:
+            error = self.errors[0]
+            self.errors.clear()
+            raise error
+
+
+def inline_worker(logger):
+    """A NetworkWorker with no thread: submit, run_pending(), assert."""
+    return InlineWorker(logger)
+
+
 class FakeConnectionManager:
     """Stands in for ConnectionManager, recording frames instead of transmitting.
 
@@ -49,11 +93,13 @@ class FakeConnectionManager:
         connected: What is_connected() reports
         raise_with: An exception every send raises instead of recording, for
             exercising the failure paths
+        connect_error: An exception connect() raises instead of connecting
     """
 
-    def __init__(self, connected=True, raise_with=None):
+    def __init__(self, connected=True, raise_with=None, connect_error=None):
         self._connected = connected
         self.raise_with = raise_with
+        self.connect_error = connect_error
         self.sent = []
         self.telexes = []
         self.info_requests = []
@@ -65,6 +111,8 @@ class FakeConnectionManager:
         return self._connected
 
     def connect(self, callsign, logon_code, network_type):
+        if self.connect_error is not None:
+            raise self.connect_error
         self._connected = True
         self.connected_as = (callsign, network_type)
 
@@ -73,16 +121,22 @@ class FakeConnectionManager:
         self.disconnected = True
 
     def send_cpdlc(self, recipient, min_value, response_type, message, mrn=None):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.sent.append((recipient, min_value, response_type, message, mrn))
 
     def send_telex(self, recipient, message):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.telexes.append((recipient, message))
 
     def send_info_request(self, info_type, icao):
+        if not self._connected:
+            raise HoppieError("Not connected")
         if self.raise_with is not None:
             raise self.raise_with
         self.info_requests.append((info_type, icao))
@@ -128,31 +182,46 @@ class FakeSimConnectManager:
 
     Args:
         result: What connect() and set_com1_standby_mhz() report back
+        tune_results: Answers for successive set_com1_standby_mhz() calls,
+            consumed in order; `result` once they run out
     """
 
-    def __init__(self, result=True):
+    def __init__(self, result=True, tune_results=None):
         self.result = result
+        self.tune_results = list(tune_results or [])
         self.tuned = []
+        self.connects = 0
+        self.disconnects = 0
+        self.connected = False
 
     def connect(self):
+        self.connects += 1
+        self.connected = self.result
         return self.result
 
+    def is_connected(self):
+        return self.connected
+
     def disconnect(self):
-        pass
+        self.disconnects += 1
+        self.connected = False
 
     def set_com1_standby_mhz(self, frequency_mhz):
         self.tuned.append(frequency_mhz)
+        if self.tune_results:
+            return self.tune_results.pop(0)
         return self.result
 
 
 class FakeWeatherMonitor:
-    """Records the lifecycle calls the window makes on the weather monitor."""
+    """Records the lifecycle calls and subscriptions the window makes on the weather monitor."""
 
     def __init__(self):
         self.stopped = False
         self.cleared = False
         self.started = False
         self.shut_down = False
+        self.subscriptions = {}
 
     def start(self, parent_window):
         self.started = True
@@ -162,23 +231,43 @@ class FakeWeatherMonitor:
 
     def clear(self):
         self.cleared = True
+        self.subscriptions.clear()
 
     def shutdown(self):
         self.shut_down = True
 
+    def subscribe(self, icao, info_type, initial_text=None):
+        self.subscriptions[(icao.upper(), info_type)] = initial_text
+
+    def unsubscribe(self, icao, info_type):
+        return self.subscriptions.pop((icao.upper(), info_type), None) is not None
+
+    def is_subscribed(self, icao, info_type):
+        return (icao.upper(), info_type) in self.subscriptions
+
+    def count(self):
+        return len(self.subscriptions)
+
 
 class FakeMenuItem:
-    """Records the label and help text the window sets on a menu item."""
+    """Records the label, help text and enabled state the window sets on a menu item."""
 
     def __init__(self, label="&Disconnect"):
         self.label = label
         self.help = ""
+        self.enabled = True
 
     def SetItemLabel(self, label):
         self.label = label
 
     def SetHelp(self, text):
         self.help = text
+
+    def Enable(self, enable=True):
+        self.enabled = enable
+
+    def IsEnabled(self):
+        return self.enabled
 
 
 class FakeSound:
@@ -192,28 +281,27 @@ class FakeSound:
         return True
 
 
-class FakeCallLater:
-    """Stands in for a wx.CallLater handle, recording whether it was cancelled."""
-
-    def __init__(self):
-        self.stopped = False
-
-    def Stop(self):
-        self.stopped = True
-
-
 class FakeCloseEvent:
-    """Stands in for the wx.CloseEvent on_close receives."""
+    """Stands in for the wx.CloseEvent on_close receives.
 
-    def __init__(self):
+    Args:
+        can_veto: What CanVeto() reports; False for a forced close (Windows
+            ending the session), which cannot be cancelled
+    """
+
+    def __init__(self, can_veto=True):
         self.skipped = False
         self.vetoed = False
+        self.can_veto = can_veto
 
     def Skip(self):
         self.skipped = True
 
     def Veto(self):
         self.vetoed = True
+
+    def CanVeto(self):
+        return self.can_veto
 
 
 class FakeClock:
@@ -296,8 +384,8 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
             defaults in place.
         simconnect: A FakeSimConnectManager; a fresh one when None
 
-    The window's deferred and delayed callbacks (`_defer`, `_retry_later`) run
-    or are recorded synchronously, since there is no event loop.
+    The window's deferred callbacks run synchronously, since there is no event
+    loop; a queued send runs when the test calls window.worker.run_pending().
     """
     from src.gui.main_window import MainWindow
 
@@ -310,6 +398,7 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.message_manager = message_manager
     window.message_view = RecordingMessageView()
     window.connection_manager = cpdlc_session.connection_manager
+    window.worker = cpdlc_session.worker
     window.polling_controller = FakePollingController()
     window.weather_monitor = FakeWeatherMonitor()
     window.menu_item_connect = FakeMenuItem()
@@ -319,16 +408,15 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window.new_message_sound = FakeSound()
     # wx.CallAfter needs a running wx.App; run deferred callbacks at once.
     window._defer = lambda callback, *args, **kwargs: callback(*args, **kwargs)
-    # wx.CallLater needs a running wx.App; record delayed callbacks instead.
-    window.retries = []
-    window._pending_retry = None
-
-    def _retry_later(delay_ms, callback, *args):
-        window.retries.append((delay_ms, callback, args))
-        window._pending_retry = FakeCallLater()
-
-    window._retry_later = _retry_later
+    window._responses_in_flight = {}
+    window._link_busy = False
     window._callsign_clash_announced = False
+    window._modal_depth = 0
+    window.pending_update = None
+    window._auto_tune_com1 = load_config().get("auto_tune_com1", True)
+    window._simconnect_reconnecting = False
+    window._pending_tune = None
+    window.update_checker = UpdateChecker(logger, window.worker)
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.
