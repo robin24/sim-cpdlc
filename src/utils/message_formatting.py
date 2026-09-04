@@ -22,12 +22,10 @@ def format_list_text(text):
     if not text or not isinstance(text, str):
         return text
 
-    # Replace @@ with N/A before splitting on single @
-    text = text.replace("@@", "N/A")
-    # Remove underscores (formatting artifacts from Hoppie messages)
-    text = text.replace("_", "")
-    # Replace @ with spaces for a compact list display
-    return text.replace("@", " ")
+    # "@" separates the fields of a CPDLC element and "_" pads them. In a
+    # one-line summary a separator becomes a space, and runs of separators
+    # ("@@", "@ @") collapse with the surrounding whitespace and line breaks.
+    return " ".join(text.replace("_", "").replace("@", " ").split())
 
 
 def format_message_text(text):
@@ -36,11 +34,9 @@ def format_message_text(text):
         return text
 
     try:
-        # Replace @@ with N/A before splitting on single @
-        text = text.replace("@@", "N/A")
         # Remove underscores (formatting artifacts from Hoppie messages)
         text = text.replace("_", "")
-        # Split by @ characters
+        # Split on the field separators; an empty segment ("@@") is skipped below
         segments = text.split("@")
 
         # Process segments for better formatting

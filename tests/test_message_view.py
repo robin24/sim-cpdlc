@@ -119,3 +119,48 @@ def test_the_response_menu_offers_every_response_and_fires_the_chosen_one(panel,
 
     panel.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, shown["ids"][1]))
     assert acknowledged == [(message_id, "UNABLE")], "binding survived the menu"
+
+
+# --- column layout -------------------------------------------------------------
+
+
+def test_the_message_column_takes_the_width_the_sender_column_leaves(panel, logger):
+    """Both columns were autosized once, while the list was still empty."""
+    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    lst = view.message_list
+    lst.SetSize((600, 200))
+
+    view._fit_columns()
+
+    assert lst.GetColumnWidth(0) > 0
+    assert lst.GetColumnWidth(1) == lst.GetClientSize().width - lst.GetColumnWidth(0)
+
+
+def test_a_resize_refits_the_columns(panel, logger):
+    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    lst = view.message_list
+    lst.SetSize((600, 200))
+    view._fit_columns()
+    narrow = lst.GetColumnWidth(1)
+
+    lst.SetSize((900, 200))
+    event = wx.SizeEvent(lst.GetSize(), lst.GetId())
+    event.SetEventObject(lst)
+    lst.GetEventHandler().ProcessEvent(event)
+
+    assert lst.GetColumnWidth(1) > narrow
+    assert lst.GetColumnWidth(1) == lst.GetClientSize().width - lst.GetColumnWidth(0)
+
+
+def test_a_long_sender_widens_its_column(panel, logger):
+    manager = MessageManager(logger)
+    view = build_view(panel, logger, manager, STATION)
+    lst = view.message_list
+    lst.SetSize((600, 200))
+    view._fit_columns()
+    before = lst.GetColumnWidth(0)
+
+    view.add_message(manager.add_message(uplink("WWWWWWWW", 4)))
+
+    assert lst.GetColumnWidth(0) > before
+    assert lst.GetColumnWidth(1) == lst.GetClientSize().width - lst.GetColumnWidth(0)

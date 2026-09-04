@@ -43,9 +43,9 @@ starts a thread on purpose.
 | `test_logon_status.py` | Logon state as reported to the user, including a logon nobody answered |
 | `test_main_window.py` | The real window: menu bindings, message list, weather toggles, settings |
 | `test_main_window_wiring.py` | `_init_ui` alone, on a stripped-down frame |
-| `test_message_formatting.py` | Packet prefix stripping and the list and detail text |
+| `test_message_formatting.py` | Packet prefix stripping and the list and detail text, including doubled separators |
 | `test_message_manager.py` | Message storage, addressing and the full response table |
-| `test_message_view.py` | The message list and its response context menu |
+| `test_message_view.py` | The message list, its column layout and its response context menu |
 | `test_network_worker.py` | The network worker: ordering, generations, pacing, failure capture, shutdown |
 | `test_polling_controller.py` | Poll intervals, polls on the worker, the back-off ladder while the link is lost, batch delivery, the tick callback |
 | `test_request_dialogs.py` | The OK-button rules and the returned values of the logon, altitude, direct-to, speed, when-can-we and telex dialogs, including the telex character count |

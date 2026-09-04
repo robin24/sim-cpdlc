@@ -38,3 +38,18 @@ def test_the_list_row_carries_no_separators():
     assert format_list_text("CURRENT ATC UNIT@_@EDUU@_@RHEIN RADAR").split() == [
         "CURRENT", "ATC", "UNIT", "EDUU", "RHEIN", "RADAR",
     ]
+
+
+def test_a_doubled_separator_is_just_a_separator():
+    """"@@" used to become "N/A" glued to its neighbours, which a screen
+    reader read as "FL360N slash AREPORT"."""
+    assert format_message_text("CLIMB TO AND MAINTAIN @FL360@@REPORT LEVEL") == (
+        "CLIMB TO AND MAINTAIN\nFL360\nREPORT LEVEL"
+    )
+    assert format_list_text("CLIMB TO AND MAINTAIN @FL360@@REPORT LEVEL") == (
+        "CLIMB TO AND MAINTAIN FL360 REPORT LEVEL"
+    )
+
+
+def test_the_list_row_has_single_spaces_and_no_line_breaks():
+    assert format_list_text("CONTACT  MAASTRICHT@\n132.850@ .") == "CONTACT MAASTRICHT 132.850 ."
