@@ -115,6 +115,7 @@ def test_saying_yes_opens_the_release_page_and_nothing_else(logger, message_boxe
 
     assert opened == ["https://example.invalid/release"]
     assert message_boxes.captions == ["Update Available"]
+    assert window.status_texts[-1] == "Version 99.0.0 is available."
 
 
 def test_a_manual_check_reports_when_there_is_nothing_new(logger, message_boxes):
@@ -123,6 +124,7 @@ def test_a_manual_check_reports_when_there_is_nothing_new(logger, message_boxes)
     window._on_manual_update_check(UpdateOutcome(latest=APP_VERSION, url="u", newer=False))
 
     assert message_boxes.captions == ["No Updates Available"]
+    assert window.status_texts[-1] == f"You are running the latest version ({APP_VERSION})."
 
 
 def test_a_manual_check_reports_a_failed_lookup(logger, message_boxes):
@@ -131,6 +133,19 @@ def test_a_manual_check_reports_a_failed_lookup(logger, message_boxes):
     window._on_manual_update_check(UpdateOutcome(error="offline"))
 
     assert message_boxes.captions == ["Update Check Failed"]
+    assert window.status_texts[-1] == "Update check failed."
+
+
+def test_a_manual_check_resolves_the_checking_status_line(logger):
+    """The status bar is what a screen-reader user queries; "Checking for
+    updates..." must not outlive the check."""
+    window = build(logger)
+    window.on_check_updates(None)
+    assert window.status_texts[-1] == "Checking for updates..."
+
+    window.worker.run_pending()
+
+    assert window.status_texts[-1] != "Checking for updates..."
 
 
 def test_an_automatic_check_stays_silent_when_there_is_nothing_new(logger, message_boxes):

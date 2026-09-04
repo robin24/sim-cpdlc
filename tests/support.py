@@ -11,6 +11,7 @@ from hoppie_connector import CpdlcMessage, CpdlcResponseRequirement as RR, Hoppi
 from src.config import DEFAULT_CONFIG, save_config
 from src.model.connection_manager import PollResult
 from src.model.network_worker import NetworkWorker
+from src.utils.update_checker import UpdateChecker
 
 CLIENT_CALLSIGN = "DLH123"
 
@@ -389,6 +390,7 @@ def make_main_window(logger, cpdlc_session, message_manager, config=None, simcon
     window._callsign_clash_announced = False
     window._modal_depth = 0
     window.pending_update = None
+    window.update_checker = UpdateChecker(logger, window.worker)
     window.status_texts = []
     # Instance attribute shadows wx.Frame.SetStatusText, which would need a
     # live C++ frame behind it.

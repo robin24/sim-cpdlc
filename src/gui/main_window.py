@@ -872,15 +872,18 @@ class MainWindow(wx.Frame):
     def _on_manual_update_check(self, outcome):
         """Report the outcome of a check the pilot asked for."""
         if outcome.newer:
+            self.SetStatusText(f"Version {outcome.latest} is available.")
             self.pending_update = outcome
             self._flush_deferred()
         elif outcome.latest:
+            self.SetStatusText(f"You are running the latest version ({APP_VERSION}).")
             self._message_box(
                 f"You are running the latest version ({APP_VERSION}).",
                 "No Updates Available",
                 wx.OK | wx.ICON_INFORMATION,
             )
         else:
+            self.SetStatusText("Update check failed.")
             self._message_box(
                 "Could not retrieve version information from GitHub.",
                 "Update Check Failed",

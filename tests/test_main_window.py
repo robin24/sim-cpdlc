@@ -54,8 +54,9 @@ def build_window(logger, wx_app, isolated_config, message_boxes):
     """A factory for the real window, kept offline and non-modal.
 
     The isolated config file is written first, so _check_first_launch() finds
-    it and shows no welcome dialog, and the update check is switched off so no
-    background thread starts. Every window built here is destroyed at teardown.
+    it and shows no welcome dialog, and the update check is switched off
+    unless a test turns it on through the overrides, so nothing reaches
+    GitHub. Every window built here is destroyed at teardown.
     """
     built = []
 
