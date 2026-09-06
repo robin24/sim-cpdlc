@@ -16,10 +16,11 @@ class CpdlcSession:
 
     The session knows who the aircraft is talking to: the station logged on,
     a REQUEST LOGON still waiting for its answer, and for a while after a
-    handover the station that handed the aircraft over, whose late uplinks
-    (typically the CONTACT instruction) are still answerable. reset() forgets
-    all of it; the callsign and network survive, because they identify the
-    aircraft rather than the dialogue.
+    handover the station that handed the aircraft over, whose late CONTACT
+    instruction still tunes the radio. Who may be answered is not its
+    business: a response goes to the message's own sender, logged on or not.
+    reset() forgets all of it; the callsign and network survive, because they
+    identify the aircraft rather than the dialogue.
     """
 
     def __init__(
@@ -334,6 +335,11 @@ class CpdlcSession:
     def send_acknowledgement(self, sender, min_value, response, on_done=None) -> bool:
         """Queue an acknowledgement response to a CPDLC message.
 
+        The response goes to the message's own sender, logged on to it or
+        not: a PDC clearance from the departure airport is answered without
+        any logon, and a station's late uplink after a handover is answered
+        however long ago the handover was.
+
         Args:
             sender: The message sender
             min_value: The message identification number being answered
@@ -346,12 +352,6 @@ class CpdlcSession:
         if not self.connection_manager.is_connected():
             self.logger.error("Cannot send acknowledgement: not connected")
             return False
-
-        if self.current_station and not self.is_answerable_sender(sender):
-            self.logger.warning(
-                f"Acknowledgement sender {sender} is not part of the dialogue "
-                f"(current station {self.current_station})"
-            )
 
         own_min = self._next_min()
         self.logger.info(
@@ -449,11 +449,12 @@ class CpdlcSession:
     def handle_handover(self, old: str, new: str, on_done=None) -> bool:
         """Follow a HANDOVER from the current station to the next one.
 
-        The old station keeps answering for a while: in 22 of 163 logged
+        The old station keeps talking for a while: in 22 of 163 logged
         handovers its CONTACT instruction arrived after the handover, in the
-        same poll as the new station's LOGON ACCEPTED. Its uplinks therefore
-        stay answerable for PREVIOUS_STATION_WINDOW_SECONDS. No LOGOFF is
-        sent; the station handing over has ended the dialogue itself.
+        same poll as the new station's LOGON ACCEPTED. It therefore stays part
+        of the dialogue, so its CONTACT is tuned, for
+        PREVIOUS_STATION_WINDOW_SECONDS. No LOGOFF is sent; the station
+        handing over has ended the dialogue itself.
 
         Args:
             old: The station handing over; must be the current station
@@ -478,12 +479,13 @@ class CpdlcSession:
         self._clear_pending()
         return self.logon(new, on_done)
 
-    def is_answerable_sender(self, sender: str) -> bool:
-        """Whether an uplink from this station can still be answered.
+    def is_dialogue_station(self, sender: str) -> bool:
+        """Whether this station is part of the live dialogue.
 
         True for the current station, and for the station that handed the
-        aircraft over until its window closes. The message list uses this to
-        decide whether to offer responses.
+        aircraft over until its window closes. The window uses this to decide
+        whether an uplink may tune the radio; it has no say in what may be
+        answered, since a response goes to the message's own sender.
 
         Args:
             sender: The station the uplink came from

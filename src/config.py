@@ -133,8 +133,9 @@ SEND_SPACING_SECONDS = 5
 INFOREQ_SPACING_SECONDS = 1
 
 # After a HANDOVER the station that handed the aircraft over may still send
-# a WILCO-required instruction (typically the CONTACT frequency); the log
-# shows this in 22 of 163 handovers. Its uplinks stay answerable this long.
+# the CONTACT instruction for the next frequency; the log shows this in 22 of
+# 163 handovers. It stays part of the dialogue, so its CONTACT is still tuned,
+# this long. Responses never depend on it: any uplink can be answered.
 PREVIOUS_STATION_WINDOW_SECONDS = 600
 
 # A REQUEST LOGON nobody answers is given up on after this long, and the

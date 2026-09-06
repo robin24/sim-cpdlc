@@ -197,7 +197,6 @@ class MainWindow(wx.Frame):
             self.logger,
             self.message_manager,
             self._on_acknowledge_message,
-            self.cpdlc_session.is_answerable_sender,
             self._on_toggle_weather_updates,
             self._is_weather_watched,
         )
@@ -1385,8 +1384,9 @@ class MainWindow(wx.Frame):
                 self.logger.info(f"Received LOGOFF from {sender}")
 
         # The station that handed the aircraft over may still send the CONTACT
-        # for the next frequency, so any answerable sender may tune the radio.
-        if session.is_answerable_sender(sender):
+        # for the next frequency, so it may tune the radio until its window
+        # closes; a station outside the dialogue may not.
+        if session.is_dialogue_station(sender):
             self._auto_tune(text)
 
     def _follow_handover(self, sender, new_station):

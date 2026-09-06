@@ -130,7 +130,7 @@ def test_disconnect_closes_a_handover_in_progress(logger):
     window.worker.run_pending()
 
     assert dialogue(session) == ("", None, "", 1)
-    assert session.is_answerable_sender(STATION) is False
+    assert session.is_dialogue_station(STATION) is False
     assert [frame[3] for frame in connection.sent] == ["REQUEST LOGON"]
 
 

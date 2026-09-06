@@ -1,6 +1,6 @@
 """Message management for the CPDLC client."""
 
-from typing import Callable, List, Tuple, Set, Optional, Any
+from typing import List, Tuple, Set, Optional, Any
 
 from hoppie_connector import (
     CpdlcMessage,
@@ -274,17 +274,16 @@ class MessageManager:
         self.acknowledged_messages.add(message_id)
         self.logger.debug(f"Marked message as acknowledged: ID={message_id}")
 
-    def needs_acknowledgement(
-        self, message_id: int, is_answerable: Callable[[str], bool]
-    ) -> Tuple[bool, List[str]]:
+    def needs_acknowledgement(self, message_id: int) -> Tuple[bool, List[str]]:
         """Check if a message needs acknowledgement and get valid responses.
+
+        Any unanswered CPDLC uplink with a response requirement can be
+        answered, whoever sent it: the response goes to the message's own
+        sender, and stations the aircraft never logs on to send answerable
+        uplinks too, above all the departure airport's PDC clearance.
 
         Args:
             message_id: The ID of the message to check
-            is_answerable: Whether a reply to a given station is still part
-                of the live dialogue. The session answers True for the
-                current station and, for a while after a handover, for the
-                station that handed the aircraft over.
 
         Returns:
             tuple: (needs_ack, responses)
@@ -292,14 +291,6 @@ class MessageManager:
         message = self.message_log.get(message_id)
 
         if isinstance(message, CpdlcMessage):
-            sender = message.get_from_name()
-            if not is_answerable(sender):
-                self.logger.debug(
-                    f"Message ID={message_id} is from {sender}, which is no "
-                    "longer part of the dialogue; not answerable."
-                )
-                return False, []
-
             # Check if this message has already been acknowledged
             if message_id not in self.acknowledged_messages:
                 responses = self._get_cpdlc_responses(message)
