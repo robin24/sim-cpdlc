@@ -75,12 +75,12 @@ def test_a_handover_from_another_station_is_shown_but_not_acted_on(logger):
     assert len(window.message_view.added) == 1
 
 
-def test_a_handover_keeps_the_old_station_answerable(logger):
+def test_a_handover_keeps_the_old_station_in_the_dialogue(logger):
     window, session, _, _ = build(logger)
 
     window._on_message_received(uplink(CURRENT, 48, "HANDOVER @EDGG@", rr=RR.NOT_REQUIRED))
 
-    assert session.is_answerable_sender(CURRENT) is True
+    assert session.is_dialogue_station(CURRENT) is True
 
 
 @pytest.mark.parametrize(
@@ -131,11 +131,12 @@ def test_the_logged_handover_sequence_tunes_and_answers_the_late_contact(logger)
     assert connection.sent == [("CZYZ", 1, RR.YES.value, "REQUEST LOGON", None)]
     assert session.get_current_station() == "CZYZ"
     assert simconnect.tuned == [135.625]
-    assert window.message_manager.needs_acknowledgement(contact_id, session.is_answerable_sender)[0] is True
+    assert window.message_manager.needs_acknowledgement(contact_id)[0] is True
 
+    # The window bounds the tuning, not the answering.
     session.clock.advance(PREVIOUS_STATION_WINDOW_SECONDS)
 
-    assert window.message_manager.needs_acknowledgement(contact_id, session.is_answerable_sender)[0] is False
+    assert window.message_manager.needs_acknowledgement(contact_id)[0] is True
 
 
 def test_a_contact_from_the_old_station_is_not_tuned_once_the_window_has_closed(logger):

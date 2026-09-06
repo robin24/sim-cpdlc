@@ -221,7 +221,7 @@ def test_logoff_clears_a_pending_logon(logger):
 # --- the handover window ------------------------------------------------------
 
 
-def test_a_handover_moves_the_logon_and_keeps_the_old_station_answerable(logger):
+def test_a_handover_moves_the_logon_and_keeps_the_old_station_in_the_dialogue(logger):
     """In 22 of 163 logged handovers the old station's CONTACT arrived after
     the handover, in the same poll as the new station's LOGON ACCEPTED."""
     session = build(logger)
@@ -234,22 +234,22 @@ def test_a_handover_moves_the_logon_and_keeps_the_old_station_answerable(logger)
     assert session.connection_manager.sent == [("CZYZ", 1, "Y", "REQUEST LOGON", None)]
     assert session.get_current_station() == ""
     assert session.pending_logon_station == "CZYZ"
-    assert session.is_answerable_sender("KUSA") is True
-    assert session.is_answerable_sender("CZYZ") is False
+    assert session.is_dialogue_station("KUSA") is True
+    assert session.is_dialogue_station("CZYZ") is False
 
 
-def test_the_old_station_stops_being_answerable_when_the_window_closes(logger):
+def test_the_old_station_leaves_the_dialogue_when_the_window_closes(logger):
     session = build(logger)
     session.handle_logon_accepted("KUSA")
     session.handle_handover("KUSA", "CZYZ")
     session.handle_logon_accepted("CZYZ", mrn=1)
 
     session.clock.advance(PREVIOUS_STATION_WINDOW_SECONDS - 1)
-    assert session.is_answerable_sender("KUSA") is True
+    assert session.is_dialogue_station("KUSA") is True
 
     session.clock.advance(1)
-    assert session.is_answerable_sender("KUSA") is False
-    assert session.is_answerable_sender("CZYZ") is True
+    assert session.is_dialogue_station("KUSA") is False
+    assert session.is_dialogue_station("CZYZ") is True
 
 
 def test_a_handover_from_a_station_that_is_not_logged_on_is_ignored(logger):
@@ -273,11 +273,11 @@ def test_a_handover_sends_no_logoff(logger):
     assert [frame[3] for frame in session.connection_manager.sent] == ["REQUEST LOGON"]
 
 
-def test_nobody_is_answerable_when_not_logged_on(logger):
+def test_nobody_is_in_the_dialogue_when_not_logged_on(logger):
     session = build(logger)
 
-    assert session.is_answerable_sender("KUSA") is False
-    assert session.is_answerable_sender("") is False
+    assert session.is_dialogue_station("KUSA") is False
+    assert session.is_dialogue_station("") is False
 
 
 def test_reset_closes_the_handover_window(logger):
@@ -287,32 +287,33 @@ def test_reset_closes_the_handover_window(logger):
 
     session.reset()
 
-    assert session.is_answerable_sender("KUSA") is False
+    assert session.is_dialogue_station("KUSA") is False
     assert (session.previous_station, session.previous_station_until) == ("", None)
 
 
-def test_only_a_stranger_is_flagged_when_acknowledged(logger, caplog):
-    """A WILCO to the station that handed over is part of the dialogue and
-    must not be logged as a mismatch."""
+def test_an_acknowledgement_goes_to_any_station_without_complaint(logger, caplog):
+    """A PDC clearance comes from an airport the aircraft never logs on to.
+    The response is addressed to the message's own sender, so no sender is
+    suspect and none is logged as a stranger to the dialogue."""
     session = build(logger)
-    session.handle_logon_accepted("KUSA")
-    session.handle_handover("KUSA", "CZYZ")
-    session.handle_logon_accepted("CZYZ", mrn=1)
+    session.handle_logon_accepted("CZYZ")
 
     # The shared `logger` fixture disables propagation so tests stay silent;
     # caplog's handler has to be attached to it directly.
     with caplog.at_level(logging.WARNING, logger=logger.name):
         logger.addHandler(caplog.handler)
-        session.send_acknowledgement("KUSA", 7, "WILCO")
-        session.send_acknowledgement("EDUU", 8, "WILCO")
+        queued = session.send_acknowledgement("EDDK", 45, "WILCO")
+    session.worker.run_pending()
 
-    flagged = [record.getMessage() for record in caplog.records if "dialogue" in record.getMessage()]
-    assert flagged == ["Acknowledgement sender EDUU is not part of the dialogue (current station CZYZ)"]
+    assert queued is True
+    assert session.connection_manager.sent == [("EDDK", 1, "N", "WILCO", 45)]
+    warnings = [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING]
+    assert warnings == []
 
 
 def test_logging_off_closes_the_handover_window(logger):
     """After Requests > Logoff the aircraft talks to nobody; a late CONTACT
-    from the station that handed over must neither tune nor offer a WILCO."""
+    from the station that handed over must not tune the radio."""
     session = build(logger)
     session.handle_logon_accepted("KUSA")
     session.handle_handover("KUSA", "CZYZ")
@@ -320,7 +321,7 @@ def test_logging_off_closes_the_handover_window(logger):
 
     session.logoff()
 
-    assert session.is_answerable_sender("KUSA") is False
+    assert session.is_dialogue_station("KUSA") is False
     assert (session.previous_station, session.previous_station_until) == ("", None)
 
 

@@ -20,7 +20,7 @@ session; CI runs them on Windows for that reason. Each test is limited to 60
 seconds.
 
 Shared test doubles (`uplink`, `FakeConnectionManager`, `FakeSimConnectManager`,
-`make_main_window`, `FakeClock`, `answerable`, `inline_worker`, ...) live in `support.py`; import them with
+`make_main_window`, `FakeClock`, `inline_worker`, ...) live in `support.py`; import them with
 `from tests.support import ...`. Network work runs on a worker thread in the
 application; tests use `inline_worker()`, which has no thread, and call
 `run_pending()` to run what a handler queued. The few tests that build the real

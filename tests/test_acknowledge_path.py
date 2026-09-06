@@ -6,7 +6,7 @@ once the frame has gone out.
 
 from hoppie_connector import CpdlcResponseRequirement as RR, HoppieError
 
-from tests.support import FakeConnectionManager, answerable, inline_worker, make_main_window, uplink
+from tests.support import FakeConnectionManager, inline_worker, make_main_window, uplink
 
 from src.model.cpdlc_session import CpdlcSession
 from src.model.message_manager import MessageManager
@@ -14,11 +14,13 @@ from src.model.message_manager import MessageManager
 STATION = "LSAG"
 
 
-def build(logger, connection=None):
+def build(logger, connection=None, station=STATION):
+    """A window as DLH123 on Hoppie, logged on to `station` ("" for none)."""
     connection = connection if connection is not None else FakeConnectionManager()
     session = CpdlcSession(logger, connection, worker=inline_worker(logger))
     session.begin_session("DLH123", "hoppie")
-    session.handle_logon_accepted(STATION)
+    if station:
+        session.handle_logon_accepted(station)
     manager = MessageManager(logger)
     window = make_main_window(logger, session, manager)
     return window, manager, connection
@@ -65,13 +67,13 @@ def test_an_acknowledgement_is_queued_and_the_status_bar_says_so(logger):
 
     assert connection.sent == []
     assert window.status_texts[-1] == "Sending WILCO..."
-    assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
+    assert manager.needs_acknowledgement(message_id)[0] is True
 
     window.worker.run_pending()
 
     assert connection.sent == [(STATION, 1, RR.NO.value, "WILCO", 53)]
     assert window.status_texts[-1] == "Sent WILCO."
-    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
+    assert manager.needs_acknowledgement(message_id) == (False, [])
     assert window.polling_controller.active_calls == 1
 
 
@@ -81,7 +83,7 @@ def test_wilco_retires_the_message(logger):
 
     acknowledge(window, message_id, "WILCO")
 
-    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
+    assert manager.needs_acknowledgement(message_id) == (False, [])
 
 
 def test_standby_is_sent_but_leaves_the_message_answerable(logger):
@@ -91,7 +93,7 @@ def test_standby_is_sent_but_leaves_the_message_answerable(logger):
     acknowledge(window, message_id, "STANDBY")
 
     assert connection.sent[-1][3] == "STANDBY"
-    assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
+    assert manager.needs_acknowledgement(message_id)[0] is True
 
 
 def test_an_unknown_id_sends_nothing_and_tells_the_user(logger):
@@ -124,7 +126,7 @@ def test_a_failed_acknowledgement_is_reported_and_stays_answerable(logger, messa
 
     assert message_boxes.captions == ["Error"]
     assert "rate_limit" in message_boxes.calls[0][0]
-    assert manager.needs_acknowledgement(message_id, answerable(STATION))[0] is True
+    assert manager.needs_acknowledgement(message_id)[0] is True
     assert window.status_texts[-1] == "Could not send WILCO."
 
 
@@ -142,7 +144,7 @@ def test_a_second_response_while_one_is_queued_is_refused(logger):
     window.worker.run_pending()
 
     assert [frame[3] for frame in connection.sent] == ["WILCO"]
-    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
+    assert manager.needs_acknowledgement(message_id) == (False, [])
 
 
 def test_a_failed_response_frees_the_message_for_another_try(logger, message_boxes):
@@ -155,4 +157,23 @@ def test_a_failed_response_frees_the_message_for_another_try(logger, message_box
     acknowledge(window, message_id, "UNABLE")
 
     assert [frame[3] for frame in connection.sent] == ["UNABLE"]
-    assert manager.needs_acknowledgement(message_id, answerable(STATION)) == (False, [])
+    assert manager.needs_acknowledgement(message_id) == (False, [])
+
+
+def test_a_pdc_clearance_is_acknowledged_without_any_logon(logger):
+    """From the log: the PDC is requested by telex, no station is logged on,
+    and the departure airport answers with a WILCO/UNABLE clearance. The WILCO
+    goes to the airport and retires the clearance like any other response."""
+    window, manager, connection = build(logger, station="")
+    clearance = uplink(
+        "EDDK",
+        45,
+        "CLRD TO @BIKF@. @WIPU1Q@ DEPARTURE. MNTN @5000@. DPRTR ON @121.055@. SQUAWK @7331@. EXPCT RWY @13L@.",
+    )
+    message_id = manager.add_message(clearance)
+    assert manager.needs_acknowledgement(message_id) == (True, ["WILCO", "UNABLE", "STANDBY"])
+
+    acknowledge(window, message_id, "WILCO")
+
+    assert connection.sent == [("EDDK", 1, RR.NO.value, "WILCO", 45)]
+    assert manager.needs_acknowledgement(message_id) == (False, [])

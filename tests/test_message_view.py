@@ -2,8 +2,9 @@
 
 import pytest
 import wx
+from hoppie_connector import CpdlcResponseRequirement as RR
 
-from tests.support import answerable, uplink
+from tests.support import uplink
 from src.gui.message_view import MIN_MESSAGE_COLUMN_WIDTH, MessageView
 from src.model.message_manager import MessageManager
 
@@ -16,10 +17,8 @@ def panel(frame):
     return wx.Panel(frame)
 
 
-def build_view(panel, logger, manager, station):
-    view = MessageView(
-        panel, logger, manager, lambda *_: None, answerable(station)
-    )
+def build_view(panel, logger, manager):
+    view = MessageView(panel, logger, manager, lambda *_: None)
     # PopupMenu runs a nested modal loop, which would hang the test. Shadowing
     # it records that a menu would have been shown.
     panel.popped = []
@@ -29,15 +28,15 @@ def build_view(panel, logger, manager, station):
 
 def test_message_list_is_single_selection(panel, logger):
     """GetFirstSelected is only unambiguous when one row can be selected."""
-    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    view = MessageView(panel, logger, MessageManager(logger), None)
 
     assert view.message_list.GetWindowStyleFlag() & wx.LC_SINGLE_SEL
 
 
-def test_no_menu_for_a_message_from_another_station(panel, logger):
+def test_no_menu_for_a_message_that_needs_no_response(panel, logger):
     manager = MessageManager(logger)
-    view = build_view(panel, logger, manager, "EDGG")
-    message_id = manager.add_message(uplink("EDYY", 4))
+    view = build_view(panel, logger, manager)
+    message_id = manager.add_message(uplink(STATION, 4, "LOGON ACCEPTED", rr=RR.NOT_REQUIRED))
     view.add_message(message_id)
     view.message_list.Select(0)
 
@@ -46,10 +45,13 @@ def test_no_menu_for_a_message_from_another_station(panel, logger):
     assert panel.popped == []
 
 
-def test_menu_shown_for_a_message_from_the_current_station(panel, logger):
+def test_menu_shown_for_an_unanswered_message_from_any_station(panel, logger):
+    """The view knows nothing about who is logged on: a PDC clearance from
+    the departure airport gets its menu like an instruction from the station
+    the aircraft is talking to."""
     manager = MessageManager(logger)
-    view = build_view(panel, logger, manager, STATION)
-    message_id = manager.add_message(uplink(STATION, 4))
+    view = build_view(panel, logger, manager)
+    message_id = manager.add_message(uplink("EDDK", 45, "CLRD TO @BIKF@. MNTN @5000@."))
     view.add_message(message_id)
     view.message_list.Select(0)
 
@@ -73,7 +75,6 @@ def test_the_weather_menu_hands_back_the_report_it_was_opened_on(panel, logger):
         logger,
         manager,
         lambda *_: None,
-        answerable(STATION),
         on_toggle_weather_updates=lambda *args: toggled.append(args),
         is_weather_watched=lambda *_: False,
     )
@@ -98,7 +99,7 @@ def test_the_response_menu_offers_every_response_and_fires_the_chosen_one(panel,
     manager = MessageManager(logger)
     acknowledged = []
     view = MessageView(
-        panel, logger, manager, lambda mid, resp: acknowledged.append((mid, resp)), answerable(STATION)
+        panel, logger, manager, lambda mid, resp: acknowledged.append((mid, resp))
     )
     message_id = manager.add_message(uplink(STATION, 4))
     shown = {}
@@ -126,7 +127,7 @@ def test_the_response_menu_offers_every_response_and_fires_the_chosen_one(panel,
 
 def test_the_message_column_takes_the_width_the_sender_column_leaves(panel, logger):
     """Both columns were autosized once, while the list was still empty."""
-    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    view = MessageView(panel, logger, MessageManager(logger), None)
     lst = view.message_list
     lst.SetSize((600, 200))
 
@@ -137,7 +138,7 @@ def test_the_message_column_takes_the_width_the_sender_column_leaves(panel, logg
 
 
 def test_a_resize_refits_the_columns(panel, logger):
-    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    view = MessageView(panel, logger, MessageManager(logger), None)
     lst = view.message_list
     lst.SetSize((600, 200))
     view._fit_columns()
@@ -155,7 +156,7 @@ def test_a_resize_refits_the_columns(panel, logger):
 def test_a_narrow_width_clamps_the_message_column(panel, logger):
     """Below MIN_MESSAGE_COLUMN_WIDTH the list scrolls sideways instead of
     truncating every row."""
-    view = MessageView(panel, logger, MessageManager(logger), None, answerable())
+    view = MessageView(panel, logger, MessageManager(logger), None)
     lst = view.message_list
     lst.SetSize((150, 200))
 
@@ -166,7 +167,7 @@ def test_a_narrow_width_clamps_the_message_column(panel, logger):
 
 def test_a_long_sender_widens_its_column(panel, logger):
     manager = MessageManager(logger)
-    view = build_view(panel, logger, manager, STATION)
+    view = build_view(panel, logger, manager)
     lst = view.message_list
     lst.SetSize((600, 200))
     view._fit_columns()
