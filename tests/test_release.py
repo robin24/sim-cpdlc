@@ -99,3 +99,15 @@ def test_the_bump_script_refreshes_the_copyright_year(tmp_path):
 
     # The real files are never touched -- only the tmp_path copies are.
     assert APP_VERSION == original_app_version
+
+
+def test_the_release_notes_are_generated_and_leave_out_the_bumps():
+    """The notes are the merged pull requests' titles, so a title is what the
+    release says about that change; the dependency bumps outnumber the real
+    changes several to one and would bury them."""
+    workflow = read(".github/workflows/build-and-release.yml")
+    config = read(".github/release.yml")
+
+    assert "generate_release_notes: true" in workflow
+    assert "dependabot" in config
+    assert "dependencies" in config

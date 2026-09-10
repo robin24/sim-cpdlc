@@ -85,9 +85,12 @@ jobs:
         with:
           filepath: ./sim-cpdlc.iss
 
-      - name: Upload Release Asset
+      - name: Publish the release
         uses: softprops/action-gh-release@v3
         with:
+          # Notes come from the pull requests merged since the previous tag.
+          # .github/release.yml decides what is left out.
+          generate_release_notes: true
           files: |
             installer/Sim-CPDLC-${{ steps.get_version.outputs.version }}.exe
         env:
