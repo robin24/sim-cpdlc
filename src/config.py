@@ -12,7 +12,7 @@ APP_AUTHOR = "Sim-CPDLC"
 GITHUB_URL = "https://github.com/robin24/sim-cpdlc"
 
 # Application version - this will be updated by update_version.py
-APP_VERSION = "2.1.2"
+APP_VERSION = "3.0.0"
 
 
 # Get user data directory
