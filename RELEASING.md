@@ -18,6 +18,10 @@ test suite, checks that `APP_VERSION` equals the tag, installs
 stops if `SimConnect.dll` is missing), builds the installer with Inno Setup and
 attaches `Sim-CPDLC-X.Y.Z.exe` to a GitHub release for the tag.
 
+The release notes are GitHub's own, generated from the pull requests merged
+since the previous tag, so a pull request's title is what the release says
+about that change. `.github/release.yml` leaves the dependency bumps out.
+
 If the version check fails, fix the files, commit, move the tag
 (`git tag -f vX.Y.Z && git push -f origin vX.Y.Z`) and the workflow runs again.
 

@@ -1,0 +1,11 @@
+# GitHub generates the release notes from the pull requests merged since the
+# previous tag; build-and-release.yml asks for them with generate_release_notes.
+# The dependency bumps are left out: they outnumber the real changes several to
+# one and would bury them. Their history stays in the pull request list.
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - dependabot[bot]
+    labels:
+      - dependencies
